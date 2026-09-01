@@ -1,0 +1,33 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local environment - never commit secrets
+.env
+
+# Database
+*.sqlite3
+db.sqlite3
+
+# Static / media
+staticfiles/
+media/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
