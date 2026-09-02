@@ -4,6 +4,10 @@ MVP uses manual rent payment recording. Paystack is a future feature; the
 schema keeps fields (gateway, reference) to extend toward that without
 rewrite. Tenant rent payments are kept entirely separate from SaaS
 subscription billing.
+
+Payment.rent_period is the single source of truth linking a payment to a
+rent obligation.  Rent-period status is derived from the aggregate of valid
+payments -- never stored redundantly.
 """
 
 from django.db import models
@@ -34,6 +38,11 @@ class Payment(models.Model):
     )
     lease = models.ForeignKey(
         'leases.Lease', on_delete=models.PROTECT, related_name='payments',
+    )
+    rent_period = models.ForeignKey(
+        'payments.RentSchedule', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='payments',
+        help_text='The rent obligation this payment targets.',
     )
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     currency = models.CharField(max_length=3, default='NGN')
@@ -66,6 +75,7 @@ class Payment(models.Model):
             models.Index(fields=['landlord', 'payment_date']),
             models.Index(fields=['tenant', 'payment_date']),
             models.Index(fields=['lease', 'payment_date']),
+            models.Index(fields=['rent_period', 'status']),
         ]
         constraints = [
             models.CheckConstraint(
@@ -87,24 +97,26 @@ class Payment(models.Model):
 
 
 class RentPeriodStatus(models.TextChoices):
-    """Rent schedule period status. Calculated by the rent service and never
-    inferred from payment records alone."""
+    """Rent schedule period status.
 
-    PAID = 'PAID', 'Paid'
-    NOT_DUE = 'NOT_DUE', 'Not yet due'
+    Derived entirely from payment records and due dates.  Never
+    client-supplied.
+    """
+
     UPCOMING = 'UPCOMING', 'Upcoming'
     DUE = 'DUE', 'Due today'
+    PARTIALLY_PAID = 'PARTIALLY_PAID', 'Partially paid'
+    PAID = 'PAID', 'Paid'
     OVERDUE = 'OVERDUE', 'Overdue'
 
 
 class RentSchedule(models.Model):
     """One rent period for a lease.
 
-    Rent is tracked separately from lease expiry. Each row is a defined rent
-    period (start/end/due date) for a fixed amount. Outstanding balance and
-    upcoming/overdue status are derived from these periods in the rent
-    service; if a PAID payment covers a period the period is PAID. This is
-    the anchor for reminders, the rent dashboard and future reconciliation.
+    Rent is tracked separately from lease expiry.  Each row is a defined
+    rent period (start/end/due date) for a fixed amount.  Outstanding
+    balance and status are derived from Payment records that reference
+    this period via Payment.rent_period.
     """
 
     lease = models.ForeignKey(
@@ -115,12 +127,6 @@ class RentSchedule(models.Model):
     due_date = models.DateField()
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     currency = models.CharField(max_length=3, default='NGN')
-    # Optional: the payment that settled this period (set by the service
-    # when a PAID payment is recorded for the period).
-    payment = models.ForeignKey(
-        'payments.Payment', null=True, blank=True,
-        on_delete=models.SET_NULL, related_name='rent_periods',
-    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,18 +1,39 @@
-"""Rent schedule and rent-status domain services.
+"""Rent schedule and payment domain services.
 
-Rent is modelled as defined periods (RentSchedule rows) that are separate
-from lease expiry. Due dates are generated from the lease's start date, rent
-frequency and rent_due_day. Status (PAID/NOT_DUE/UPCOMING/DUE/OVERDUE) is
-computed per period from the due date and whether a PAID payment covers it -
-never inferred from payment records alone.
+All financial business logic lives here.  Views and serializers never
+compute balances or mutate payment state directly.
+
+Rent-period status is derived from:
+
+    paid_amount = SUM(Payment.amount WHERE rent_period = period
+                      AND status = PAID)
+
+and compared to the period's ``amount``.  This is the single source of
+truth -- no redundant balance fields are stored.
+
+Concurrency: payment creation / update / cancellation lock the affected
+rent-period rows (``select_for_update``) inside a ``transaction.atomic``
+block so that simultaneous operations against the same period cannot
+produce inconsistent balances.
 """
 
 from datetime import date, timedelta
+from decimal import Decimal
+
 from dateutil.relativedelta import relativedelta
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
 
-from core.exceptions import DomainError
+from core.exceptions import ConflictError, DomainError
 
-from .models import RentPeriodStatus, RentSchedule
+from .models import (
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
+    RentPeriodStatus,
+    RentSchedule,
+)
 
 FREQUENCY_MONTHS = {
     'MONTHLY': 1,
@@ -21,28 +42,32 @@ FREQUENCY_MONTHS = {
     'ANNUALLY': 12,
 }
 
+# Only these payment statuses financially count toward a rent period.
+FINANCIALLY_VALID_STATUSES = {PaymentStatus.PAID}
+
+
+# ---------------------------------------------------------------------------
+# Schedule generation
+# ---------------------------------------------------------------------------
 
 def _next_month_date(base_date, months):
     return base_date + relativedelta(months=months)
 
 
 def _normalize_due_day(month_date, due_day):
-    """Clamp due_day to the last valid day of `month_date`'s month."""
+    """Clamp due_day to the last valid day of ``month_date``'s month."""
     import calendar
     last_day = calendar.monthrange(month_date.year, month_date.month)[1]
-    return date(
-        month_date.year,
-        month_date.month,
-        min(due_day, last_day),
-    )
+    return date(month_date.year, month_date.month, min(due_day, last_day))
 
 
 def generate_schedule(lease):
     """Create the full RentSchedule for a lease if not already present.
 
-    Periods are generated from start_date forward per rent_frequency,
-    using the lease's rent_due_day (clamped to month length). Generation is
-    idempotent: existing (lease, due_date) pairs are preserved.
+    Periods are generated from ``start_date`` forward per
+    ``rent_frequency``, using the lease's ``rent_due_day`` (clamped to
+    month length).  Generation is idempotent: existing
+    ``(lease, due_date)`` pairs are preserved.
     """
     frequency = lease.rent_frequency
     if frequency not in FREQUENCY_MONTHS:
@@ -53,15 +78,12 @@ def generate_schedule(lease):
     period_start = lease.start_date
     due_day = lease.rent_due_day
 
-    # The first due date is the start date (or the clamped due day in the
-    # lease start month). We anchor the first period at start_date.
     loop_date = period_start
     while loop_date <= lease.expiry_date:
         period_end = period_start + relativedelta(months=months, days=-1)
         if period_end > lease.expiry_date:
             period_end = lease.expiry_date
         due_date = _normalize_due_day(loop_date, due_day)
-        # Avoid duplicate (lease, due_date) rows on idempotent regeneration.
         if not RentSchedule.objects.filter(lease=lease, due_date=due_date).exists():
             rent = RentSchedule.objects.create(
                 lease=lease,
@@ -72,21 +94,45 @@ def generate_schedule(lease):
                 currency=lease.currency,
             )
             created.append(rent)
-        # Advance.
         period_start = period_end + timedelta(days=1)
         loop_date = _next_month_date(loop_date, months)
     return created
 
 
-def period_status(rent_period, today=None):
-    """Compute status for a single rent period (Billing-derived, not payment
-    -only. A PAID payment associated with the period yields PAID; otherwise
-    the period is classified against today's date.):
+# ---------------------------------------------------------------------------
+# Period status derivation
+# ---------------------------------------------------------------------------
+
+def _paid_amount_for_period(rent_period):
+    """Aggregate of financially valid payments for a rent period.
+
+    Only payments with status PAID are counted.  This is the single
+    source of truth for how much has been paid toward a period.
     """
-    today = today or date.today()
-    payment = rent_period.payment
-    if payment is not None and payment.status == 'PAID':
+    result = Payment.objects.filter(
+        rent_period=rent_period,
+        status=PaymentStatus.PAID,
+    ).aggregate(total=Sum('amount'))
+    return result['total'] or Decimal('0')
+
+
+def period_status(rent_period, today=None):
+    """Derive the lifecycle status for a single rent period.
+
+    Precedence (evaluated in order):
+
+    1. paid >= amount  →  PAID
+    2. 0 < paid < amount  →  PARTIALLY_PAID
+    3. paid == 0 and due_date > today  →  UPCOMING
+    4. paid == 0 and due_date == today  →  DUE
+    5. paid == 0 and due_date < today  →  OVERDUE
+    """
+    today = today or timezone.localdate()
+    paid = _paid_amount_for_period(rent_period)
+    if paid >= rent_period.amount:
         return RentPeriodStatus.PAID
+    if paid > 0:
+        return RentPeriodStatus.PARTIALLY_PAID
     if rent_period.due_date > today:
         return RentPeriodStatus.UPCOMING
     if rent_period.due_date == today:
@@ -94,8 +140,21 @@ def period_status(rent_period, today=None):
     return RentPeriodStatus.OVERDUE
 
 
+def paid_amount(rent_period):
+    """Public accessor for the aggregate paid amount of a period."""
+    return _paid_amount_for_period(rent_period)
+
+
+def remaining_amount(rent_period):
+    """Amount still owed on a rent period (never negative)."""
+    paid = _paid_amount_for_period(rent_period)
+    leftover = rent_period.amount - paid
+    return leftover if leftover > 0 else Decimal('0')
+
+
 def annotate_statuses(rent_periods, today=None):
-    today = today or date.today()
+    """Attach a ``status`` attribute to each rent period in the list."""
+    today = today or timezone.localdate()
     for period in rent_periods:
         period.status = period_status(period, today)
     return rent_periods
@@ -103,7 +162,7 @@ def annotate_statuses(rent_periods, today=None):
 
 def next_due(lease, today=None):
     """Return the next unpaid rent period (due today or later), or None."""
-    today = today or date.today()
+    today = today or timezone.localdate()
     periods = lease.rent_schedule.filter(due_date__gte=today)
     for period in annotate_statuses(periods):
         if period.status == RentPeriodStatus.PAID:
@@ -113,28 +172,165 @@ def next_due(lease, today=None):
 
 
 def overdue_periods(lease, today=None):
-    today = today or date.today()
+    today = today or timezone.localdate()
     periods = lease.rent_schedule.filter(due_date__lt=today)
     return [
         p for p in annotate_statuses(periods)
-        if p.status == RentPeriodStatus.OVERDUE
+        if p.status in (RentPeriodStatus.OVERDUE, RentPeriodStatus.PARTIALLY_PAID)
     ]
 
 
 def unpaid_periods(lease, today=None):
-    today = today or date.today()
+    today = today or timezone.localdate()
     periods = lease.rent_schedule.all()
     return [
         p for p in annotate_statuses(periods)
-        if p.status in (RentPeriodStatus.UPCOMING, RentPeriodStatus.DUE,
-                        RentPeriodStatus.OVERDUE)
+        if p.status in (
+            RentPeriodStatus.UPCOMING, RentPeriodStatus.DUE,
+            RentPeriodStatus.OVERDUE, RentPeriodStatus.PARTIALLY_PAID,
+        )
     ]
 
 
-def settle_period(rent_period, payment):
-    """Mark a rent period as settled by a PAID payment."""
-    if payment.status != 'PAID':
-        raise DomainError('Only PAID payments can settle a rent period.')
-    rent_period.payment = payment
-    rent_period.save(update_fields=['payment', 'updated_at'])
-    return rent_period
+# ---------------------------------------------------------------------------
+# Period lock helpers
+# ---------------------------------------------------------------------------
+
+def _lock_period(period_id):
+    """Select-for-update a rent period row.  Returns the locked instance."""
+    return (
+        RentSchedule.objects
+        .select_for_update()
+        .get(pk=period_id)
+    )
+
+
+def _lock_two_periods(id_a, id_b):
+    """Lock two rent-period rows in deterministic (ascending PK) order.
+
+    Returns ``(locked_a, locked_b)`` in the *original* argument order.
+    """
+    if id_a == id_b:
+        return _lock_period(id_a), None
+    first_id, second_id = sorted((id_a, id_b))
+    first = _lock_period(first_id)
+    second = _lock_period(second_id)
+    if first_id == id_a:
+        return first, second
+    return second, first
+
+
+# ---------------------------------------------------------------------------
+# Payment CRUD
+# ---------------------------------------------------------------------------
+
+def _validate_payment_lease_match(lease, tenant, rent_period=None):
+    """Ensure the lease/tenant/period relationships are consistent."""
+    if lease.tenant_id != tenant.id:
+        raise ConflictError(
+            'The specified tenant does not belong to this lease.',
+            code='tenant_lease_mismatch',
+        )
+    if rent_period is not None:
+        if rent_period.lease_id != lease.id:
+            raise ConflictError(
+                'The specified rent period does not belong to this lease.',
+                code='period_lease_mismatch',
+            )
+
+
+@transaction.atomic
+def record_payment(*, landlord, tenant, lease, rent_period=None,
+                   amount, currency='NGN', payment_date,
+                   payment_method=PaymentMethod.BANK_TRANSFER,
+                   reference='', notes='', status=PaymentStatus.PAID,
+                   recorded_by=None):
+    """Create a payment record and recalculate the affected rent period.
+
+    Row-level locking (``select_for_update``) on the rent period prevents
+    concurrent payments from producing an inconsistent aggregate.
+    """
+    _validate_payment_lease_match(lease, tenant, rent_period)
+
+    if rent_period is not None:
+        locked = _lock_period(rent_period.pk)
+    else:
+        locked = None
+
+    payment = Payment.objects.create(
+        landlord=landlord,
+        tenant=tenant,
+        lease=lease,
+        rent_period=locked,
+        amount=amount,
+        currency=currency,
+        payment_date=payment_date,
+        payment_method=payment_method,
+        reference=reference,
+        notes=notes,
+        status=status,
+        recorded_by=recorded_by,
+    )
+    return payment
+
+
+@transaction.atomic
+def update_payment(payment, *, amount=None, currency=None,
+                   payment_date=None, payment_method=None,
+                   reference=None, notes=None, status=None,
+                   rent_period=None):
+    """Update a payment and recalculate affected rent period(s).
+
+    If the rent_period FK changes, both the old and new periods are
+    locked in deterministic order to prevent deadlocks.
+    """
+    if amount is not None:
+        payment.amount = amount
+    if currency is not None:
+        payment.currency = currency
+    if payment_date is not None:
+        payment.payment_date = payment_date
+    if payment_method is not None:
+        payment.payment_method = payment_method
+    if reference is not None:
+        payment.reference = reference
+    if notes is not None:
+        payment.notes = notes
+    if status is not None:
+        payment.status = status
+
+    old_period_id = payment.rent_period_id
+    new_period_id = rent_period.pk if rent_period is not None else payment.rent_period_id
+
+    if rent_period is not None:
+        payment.rent_period = rent_period
+
+    payment.full_clean()
+    payment.save()
+
+    affected_ids = {old_period_id, new_period_id} - {None}
+    if affected_ids:
+        ids = sorted(affected_ids)
+        for pid in ids:
+            RentSchedule.objects.select_for_update().get(pk=pid)
+
+    return payment
+
+
+@transaction.atomic
+def cancel_payment(payment):
+    """Cancel a payment by setting status to CANCELLED.
+
+    The rent-period aggregate is recalculated so the cancelled payment
+    no longer counts toward the balance.
+    """
+    if payment.status == PaymentStatus.CANCELLED:
+        raise DomainError('Payment is already cancelled.', code='already_cancelled')
+
+    period_id = payment.rent_period_id
+    if period_id is not None:
+        RentSchedule.objects.select_for_update().get(pk=period_id)
+
+    payment.status = PaymentStatus.CANCELLED
+    payment.save(update_fields=['status', 'updated_at'])
+    return payment

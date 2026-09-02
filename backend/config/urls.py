@@ -24,6 +24,7 @@ urlpatterns = [
     path(API_PREFIX + 'auth/', include('core.urls')),
     path(API_PREFIX + 'tenants/', include('tenants.urls')),
     path(API_PREFIX + 'leases/', include('leases.urls')),
+    path(API_PREFIX, include('payments.urls')),
     path(API_PREFIX, include(router.urls)),
     # Nested units: /api/v1/properties/{property_pk}/units/
     path(

@@ -26,6 +26,8 @@ class RentScheduleItemSerializer(serializers.Serializer):
     amount = serializers.CharField(read_only=True)
     currency = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
+    paid_amount = serializers.CharField(read_only=True)
+    remaining_amount = serializers.CharField(read_only=True)
 
 
 class LeaseRenewSerializer(serializers.Serializer):
@@ -159,7 +161,7 @@ class LeaseDetailSerializer(LeaseSerializer):
 
     @extend_schema_field(RentScheduleItemSerializer(many=True))
     def get_rent_schedule(self, obj):
-        from payments.services import period_status
+        from payments.services import paid_amount, period_status, remaining_amount
 
         periods = obj.rent_schedule.all()
         return [
@@ -168,6 +170,8 @@ class LeaseDetailSerializer(LeaseSerializer):
                 'period_end': p.period_end, 'due_date': p.due_date,
                 'amount': str(p.amount), 'currency': p.currency,
                 'status': period_status(p),
+                'paid_amount': str(paid_amount(p)),
+                'remaining_amount': str(remaining_amount(p)),
             }
             for p in periods
         ]
