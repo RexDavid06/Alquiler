@@ -7,6 +7,7 @@ server and never writable.
 """
 
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from leases.models import Lease
@@ -38,12 +39,15 @@ class RentScheduleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    @extend_schema_field(serializers.CharField())
     def get_status(self, obj):
         return period_status(obj)
 
+    @extend_schema_field(serializers.CharField())
     def get_paid_amount(self, obj):
         return str(paid_amount(obj))
 
+    @extend_schema_field(serializers.CharField())
     def get_remaining_amount(self, obj):
         return str(remaining_amount(obj))
 
@@ -103,6 +107,10 @@ class PaymentCreateSerializer(serializers.Serializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Scope querysets to the authenticated landlord.
+        # During schema generation (swagger_fake_view), skip queryset scoping
+        # because the mock request has no real user.
+        if getattr(self.context.get('view'), 'swagger_fake_view', False):
+            return
         user = self.context['request'].user
         self.fields['tenant'].queryset = User.objects.filter(role='TENANT')
         self.fields['lease'].queryset = Lease.objects.filter(landlord=user)

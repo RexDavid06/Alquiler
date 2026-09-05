@@ -48,6 +48,8 @@ class InvitationViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return TenantInvitation.objects.none()
         landlord = getattr(self.request, 'user', None)
         if landlord is None or not getattr(landlord, 'is_authenticated', False):
             return TenantInvitation.objects.none()
@@ -94,6 +96,8 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
         return LandlordTenantListSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return User.objects.none()
         landlord = getattr(self.request, 'user', None)
         if landlord is None or not getattr(landlord, 'is_authenticated', False):
             return User.objects.none()

@@ -40,7 +40,7 @@ class LeaseRenewSerializer(serializers.Serializer):
     )
     currency = serializers.RegexField(r'^[A-Z]{3}$')
     rent_frequency = serializers.ChoiceField(choices=RentFrequency.choices)
-    rent_due_day = serializers.IntegerField(min_value=1, max_value=28)
+    rent_due_day = serializers.IntegerField(min_value=1, max_value=31)
     notes = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
@@ -65,9 +65,9 @@ class LeaseSerializer(serializers.ModelSerializer):
     )
     currency = serializers.RegexField(r'^[A-Z]{3}$')
     rent_frequency = serializers.ChoiceField(choices=RentFrequency.choices)
-    rent_due_day = serializers.IntegerField(min_value=1, max_value=28)
+    rent_due_day = serializers.IntegerField(min_value=1, max_value=31)
     # Computed by the backend lifecycle; never settable by clients.
-    status = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField(read_only=True)
     previous_lease = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
@@ -87,6 +87,7 @@ class LeaseSerializer(serializers.ModelSerializer):
             'terminated_at', 'created_at', 'updated_at',
         ]
 
+    @extend_schema_field(serializers.ChoiceField(choices=LeaseStatus.choices))
     def get_status(self, obj):
         value = getattr(obj, 'effective_status_value', None)
         if value is not None:
@@ -192,5 +193,6 @@ class LeaseHistorySerializer(serializers.ModelSerializer):
             'previous_lease_id', 'terminated_at', 'created_at',
         ]
 
+    @extend_schema_field(serializers.ChoiceField(choices=LeaseStatus.choices))
     def get_status(self, obj):
         return obj.effective_status()

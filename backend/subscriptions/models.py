@@ -28,6 +28,38 @@ class SubscriptionStatus(models.TextChoices):
     EXPIRED = 'EXPIRED', 'Expired'
 
 
+class BillingCycle(models.TextChoices):
+    MONTHLY = 'MONTHLY', 'Monthly'
+    QUARTERLY = 'QUARTERLY', 'Quarterly'
+    ANNUALLY = 'ANNUALLY', 'Annually'
+
+
+# Valid status transitions: from status -> set of allowed target statuses.
+# INVALID transitions should raise a DomainError in services.
+VALID_STATUS_TRANSITIONS = {
+    SubscriptionStatus.TRIAL: {
+        SubscriptionStatus.ACTIVE,
+        SubscriptionStatus.CANCELLED,
+        SubscriptionStatus.EXPIRED,
+    },
+    SubscriptionStatus.ACTIVE: {
+        SubscriptionStatus.PAST_DUE,
+        SubscriptionStatus.CANCELLED,
+    },
+    SubscriptionStatus.PAST_DUE: {
+        SubscriptionStatus.ACTIVE,
+        SubscriptionStatus.CANCELLED,
+        SubscriptionStatus.EXPIRED,
+    },
+    SubscriptionStatus.CANCELLED: {
+        SubscriptionStatus.ACTIVE,  # reactivation
+    },
+    SubscriptionStatus.EXPIRED: {
+        SubscriptionStatus.ACTIVE,  # reactivation
+    },
+}
+
+
 class Plan(models.Model):
     """A subscription plan offered to landlords. Configurable via DB/admin."""
 
@@ -66,11 +98,16 @@ class Subscription(models.Model):
         max_length=20, choices=SubscriptionStatus.choices,
         default=SubscriptionStatus.TRIAL,
     )
+    billing_cycle = models.CharField(
+        max_length=20, choices=BillingCycle.choices,
+        default=BillingCycle.MONTHLY,
+    )
     started_at = models.DateTimeField(default=timezone.now)
     current_period_start = models.DateTimeField(default=timezone.now)
     current_period_end = models.DateTimeField(null=True, blank=True)
     trial_end = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -79,6 +116,29 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f'{self.landlord.email} → {self.plan.name} [{self.status}]'
+
+    @property
+    def is_trial_expired(self):
+        """True if this subscription is on a paid plan and the trial has ended."""
+        if self.status != SubscriptionStatus.TRIAL:
+            return False
+        if self.plan.tier == PlanTier.FREE:
+            return False
+        if self.trial_end is None:
+            return False
+        return timezone.now() >= self.trial_end
+
+    @property
+    def is_cancelled(self):
+        return self.status == SubscriptionStatus.CANCELLED
+
+    @property
+    def is_active_subscription(self):
+        """True if the subscription allows resource creation."""
+        return self.status in (
+            SubscriptionStatus.TRIAL,
+            SubscriptionStatus.ACTIVE,
+        )
 
     @property
     def active_tenants_count(self):

@@ -186,7 +186,7 @@ class LeaseCreateApiTests(LeaseApiBase):
         resp = self.client.post(
             self.url, lease_payload(
                 tenant=self.tenant.id, property=self.property.id, unit=self.unit.id,
-                rent_due_day=29,
+                rent_due_day=32,
             ), **auth(self.landlord_a),
         )
         self.assertEqual(resp.status_code, 400)
@@ -216,13 +216,15 @@ class LeaseCreateApiTests(LeaseApiBase):
         self.assertEqual(resp.status_code, 400)
 
     def test_non_tenant_account_rejected(self):
-        employee = User.objects.create_user(
-            email='ops@example.com', password='pass12345', role='STAFF',
+        # A LANDLORD user cannot be used as the tenant in a lease.
+        non_tenant = User.objects.create_user(
+            email='ops@example.com', password='pass12345', role='LANDLORD',
             first_name='O', last_name='Ops', status='ACTIVE',
         )
+        ensure_landlord_subscription(non_tenant)
         resp = self.client.post(
             self.url, lease_payload(
-                tenant=employee.id, property=self.property.id, unit=self.unit.id,
+                tenant=non_tenant.id, property=self.property.id, unit=self.unit.id,
             ), **auth(self.landlord_a),
         )
         self.assertEqual(resp.status_code, 400)

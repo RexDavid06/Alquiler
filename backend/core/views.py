@@ -4,6 +4,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth import get_user_model
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
@@ -28,6 +29,11 @@ def _issue_token(user):
     return token.key
 
 
+@extend_schema(
+    request=RegisterSerializer,
+    responses={201: {'type': 'object', 'properties': {'user': {'$ref': '#/components/schemas/User'}, 'token': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
@@ -51,6 +57,11 @@ def register(request):
     )
 
 
+@extend_schema(
+    request=LoginSerializer,
+    responses={200: {'type': 'object', 'properties': {'user': {'$ref': '#/components/schemas/User'}, 'token': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
@@ -63,6 +74,11 @@ def login(request):
     )
 
 
+@extend_schema(
+    request=None,
+    responses={200: {'type': 'object', 'properties': {'detail': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
@@ -74,12 +90,21 @@ def logout(request):
     return Response({'detail': 'Logged out.'})
 
 
+@extend_schema(
+    responses={200: UserSerializer},
+    tags=['auth'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me(request):
     return Response(UserSerializer(request.user).data)
 
 
+@extend_schema(
+    request=UpdateProfileSerializer,
+    responses={200: UserSerializer},
+    tags=['auth'],
+)
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_profile(request):
@@ -91,6 +116,11 @@ def update_profile(request):
     return Response(UserSerializer(request.user).data)
 
 
+@extend_schema(
+    request=ChangePasswordSerializer,
+    responses={200: {'type': 'object', 'properties': {'detail': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def change_password(request):
@@ -105,6 +135,11 @@ def change_password(request):
     return Response({'detail': 'Password changed.'})
 
 
+@extend_schema(
+    request=PasswordResetRequestSerializer,
+    responses={200: {'type': 'object', 'properties': {'detail': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def password_reset_request(request):
@@ -134,6 +169,11 @@ def password_reset_request(request):
     return Response({'detail': 'If that email exists, a reset link was sent.'})
 
 
+@extend_schema(
+    request=PasswordResetConfirmSerializer,
+    responses={200: {'type': 'object', 'properties': {'detail': {'type': 'string'}}}},
+    tags=['auth'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def password_reset_confirm(request):
@@ -152,3 +192,29 @@ def password_reset_confirm(request):
     # Invalidate existing sessions.
     Token.objects.filter(user=user).delete()
     return Response({'detail': 'Password has been reset.'})
+
+
+@extend_schema(
+    responses={200: {'type': 'object', 'properties': {'status': {'type': 'string'}, 'database': {'type': 'string'}}}},
+    tags=['system'],
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """Lightweight health check for uptime monitors.
+
+    Returns 200 with minimal status info when healthy.
+    Returns 503 on database connectivity failure.
+    Exposes no sensitive infrastructure details.
+    """
+    from django.db import connection
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+    except Exception:
+        return Response(
+            {'status': 'unhealthy', 'database': 'unavailable'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return Response({'status': 'healthy', 'database': 'ok'})

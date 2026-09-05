@@ -73,6 +73,10 @@ class Notification(models.Model):
         'payments.Payment', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='notifications',
     )
+    rent_period = models.ForeignKey(
+        'payments.RentSchedule', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='notifications',
+    )
     invitation = models.ForeignKey(
         'tenants.TenantInvitation', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='notifications',

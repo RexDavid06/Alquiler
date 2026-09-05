@@ -1,0 +1,4 @@
+# Alquiler backend — development/test dependencies
+# Includes everything from requirements.txt plus dev tools
+
+-r requirements.txt

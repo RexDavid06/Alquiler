@@ -77,6 +77,8 @@ class LeaseViewSet(viewsets.ModelViewSet):
         return LeaseSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Lease.objects.none()
         user = getattr(self.request, 'user', None)
         if user is not None and getattr(user, 'is_landlord', False):
             qs = Lease.objects.filter(landlord=user)

@@ -31,6 +31,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Property.objects.none()
         qs = Property.objects.select_related('landlord')
         # Schema generation runs without an authenticated request user.
         user = getattr(self.request, 'user', None)
@@ -85,6 +87,8 @@ class UnitViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Unit.objects.none()
         qs = Unit.objects.select_related('property')
         # Schema generation runs without an authenticated request user.
         user = getattr(self.request, 'user', None)
