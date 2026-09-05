@@ -849,9 +849,15 @@ class OpenAPISchemaTests(TestCase):
     def test_schema_generation(self):
         from drf_spectacular.generators import SchemaGenerator
         generator = SchemaGenerator()
-        schema = generator.get_schema()
+        # public=True matches the production contract: SpectacularAPIView
+        # serves with serve_public=True (drf-spectacular default), which
+        # means the schema documents all endpoints regardless of auth.
+        schema = generator.get_schema(public=True)
         self.assertIn('paths', schema)
-        # Check that payment endpoints are present
         paths = schema['paths']
+        # Check that all major endpoint groups are present
         self.assertTrue(any('/payments' in p for p in paths))
         self.assertTrue(any('/rent-schedules' in p for p in paths))
+        self.assertTrue(any('/leases' in p for p in paths))
+        self.assertTrue(any('/properties' in p for p in paths))
+        self.assertTrue(any('/tenants' in p for p in paths))

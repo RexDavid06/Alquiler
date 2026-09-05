@@ -79,7 +79,7 @@ class Lease(models.Model):
                 name='lease_currency_iso3',
             ),
             models.CheckConstraint(
-                condition=models.Q(rent_due_day__gte=1) & models.Q(rent_due_day__lte=28),
+                condition=models.Q(rent_due_day__gte=1) & models.Q(rent_due_day__lte=31),
                 name='lease_rent_due_day_range',
             ),
             models.CheckConstraint(

@@ -6,13 +6,17 @@ Data isolation is enforced at the queryset level:
 * Write operations (create/update/cancel) are landlord-only.
 """
 
+from decimal import Decimal
+
+from django.db.models import Case, F, Q, Sum, Value, When
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
-from payments.models import Payment, RentSchedule
+from payments.models import Payment, PaymentStatus, RentSchedule
 from payments.services import (
     cancel_payment,
     overdue_periods,
@@ -69,6 +73,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     * Tenants: read-only (list, retrieve).
     """
 
+    serializer_class = PaymentSerializer
     permission_classes = [PaymentAccessPermission]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     filter_backends = [SearchFilter, OrderingFilter]
@@ -84,6 +89,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
         return PaymentSerializer
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Payment.objects.none()
         user = getattr(self.request, 'user', None)
         if user is None or not user.is_authenticated:
             return Payment.objects.none()
@@ -178,6 +185,9 @@ class RentScheduleViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only access to rent periods for landlords and tenants.
 
     Supports filtering by status, lease, and tenant.
+    Status filtering is DB-level: the paid amount is annotated via a
+    conditional aggregation subquery so that the queryset remains
+    filterable, orderable, and paginated.
     """
 
     permission_classes = [RentScheduleAccessPermission]
@@ -188,12 +198,13 @@ class RentScheduleViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['due_date']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return RentSchedule.objects.none()
         user = getattr(self.request, 'user', None)
         if user is None or not user.is_authenticated:
             return RentSchedule.objects.none()
 
         if user.is_landlord or user.is_platform_admin:
-            from leases.models import Lease
             qs = RentSchedule.objects.filter(
                 lease__landlord=user,
             )
@@ -206,31 +217,42 @@ class RentScheduleViewSet(viewsets.ReadOnlyModelViewSet):
 
         qs = qs.select_related('lease', 'lease__tenant')
 
-        # Filter by status (requires Python-side derivation since status
-        # is computed, not stored).
+        # Annotate the aggregate paid amount so status filtering
+        # can be expressed as DB-level conditions.
+        paid_annotation = Sum(
+            'payments__amount',
+            filter=Q(payments__status=PaymentStatus.PAID),
+            default=Decimal('0'),
+        )
+        qs = qs.annotate(_paid=paid_annotation)
+
+        # DB-level status filtering using the annotated _paid value.
         status_filter = self.request.query_params.get('status')
         if status_filter:
-            qs = [
-                p for p in qs if period_status(p) == status_filter.upper()
-            ]
+            today = timezone.localdate()
+            sf = status_filter.upper()
+            if sf == 'PAID':
+                qs = qs.filter(_paid__gte=F('amount'))
+            elif sf == 'PARTIALLY_PAID':
+                qs = qs.filter(_paid__gt=0, _paid__lt=F('amount'))
+            elif sf == 'UPCOMING':
+                qs = qs.filter(_paid=0, due_date__gt=today)
+            elif sf == 'DUE':
+                qs = qs.filter(_paid=0, due_date=today)
+            elif sf == 'OVERDUE':
+                qs = qs.filter(_paid=0, due_date__lt=today)
+            else:
+                # Unknown status → empty result, keep queryset type.
+                qs = qs.none()
 
         # Filter by lease
         lease_id = self.request.query_params.get('lease')
         if lease_id:
-            qs = [p for p in qs if p.lease_id == int(lease_id)] if hasattr(qs, '__iter__') else qs.filter(lease_id=lease_id)
+            qs = qs.filter(lease_id=lease_id)
 
         # Filter by tenant (landlord only)
         tenant_id = self.request.query_params.get('tenant')
         if tenant_id and user.is_landlord:
-            qs = [p for p in qs if p.lease.tenant_id == int(tenant_id)] if hasattr(qs, '__iter__') else qs.filter(lease__tenant_id=tenant_id)
+            qs = qs.filter(lease__tenant_id=tenant_id)
 
         return qs
-
-    def list(self, request, *args, **kwargs):
-        qs = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(qs)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(qs, many=True)
-        return Response(serializer.data)

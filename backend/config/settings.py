@@ -224,3 +224,68 @@ DEFAULT_CURRENCY = env('DEFAULT_CURRENCY', default='NGN')
 
 # Base URL for building invitation links in emails.
 SITE_URL = env('SITE_URL', default='http://localhost:5173')
+
+# Subscription trial duration (days). Override via env for different markets.
+TRIAL_DURATION_DAYS = env.int('TRIAL_DURATION_DAYS', default=14)
+
+# Logging configuration
+LOG_LEVEL = env('LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO')
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'filters': {
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': LOG_LEVEL,
+            'filters': ['require_debug_true'],
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'production': {
+            'level': 'WARNING',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'] if DEBUG else ['production'],
+        'level': LOG_LEVEL,
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'] if DEBUG else ['production'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'] if DEBUG else ['production'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['console'] if DEBUG else ['production'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'alquiler': {
+            'handlers': ['console'] if DEBUG else ['production'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+    },
+}

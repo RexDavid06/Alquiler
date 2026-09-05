@@ -82,7 +82,9 @@ def generate_schedule(lease):
     while loop_date <= lease.expiry_date:
         period_end = period_start + relativedelta(months=months, days=-1)
         if period_end > lease.expiry_date:
-            period_end = lease.expiry_date
+            # The natural period end exceeds the lease expiry.
+            # Do not create a partial/clamped residual period.
+            break
         due_date = _normalize_due_day(loop_date, due_day)
         if not RentSchedule.objects.filter(lease=lease, due_date=due_date).exists():
             rent = RentSchedule.objects.create(
@@ -282,8 +284,22 @@ def update_payment(payment, *, amount=None, currency=None,
     """Update a payment and recalculate affected rent period(s).
 
     If the rent_period FK changes, both the old and new periods are
-    locked in deterministic order to prevent deadlocks.
+    locked in deterministic order (ascending PK) to prevent deadlocks.
+    Locks are acquired BEFORE the payment is modified/saved so that
+    concurrent operations against the same periods cannot observe
+    inconsistent state.
     """
+    old_period_id = payment.rent_period_id
+    new_period_id = rent_period.pk if rent_period is not None else payment.rent_period_id
+
+    # --- Acquire locks BEFORE modifying the payment ---
+    affected_ids = {old_period_id, new_period_id} - {None}
+    if affected_ids:
+        sorted_ids = sorted(affected_ids)
+        for pid in sorted_ids:
+            RentSchedule.objects.select_for_update().get(pk=pid)
+
+    # --- Now safe to modify the payment ---
     if amount is not None:
         payment.amount = amount
     if currency is not None:
@@ -299,20 +315,11 @@ def update_payment(payment, *, amount=None, currency=None,
     if status is not None:
         payment.status = status
 
-    old_period_id = payment.rent_period_id
-    new_period_id = rent_period.pk if rent_period is not None else payment.rent_period_id
-
     if rent_period is not None:
         payment.rent_period = rent_period
 
     payment.full_clean()
     payment.save()
-
-    affected_ids = {old_period_id, new_period_id} - {None}
-    if affected_ids:
-        ids = sorted(affected_ids)
-        for pid in ids:
-            RentSchedule.objects.select_for_update().get(pk=pid)
 
     return payment
 
@@ -321,12 +328,14 @@ def update_payment(payment, *, amount=None, currency=None,
 def cancel_payment(payment):
     """Cancel a payment by setting status to CANCELLED.
 
-    The rent-period aggregate is recalculated so the cancelled payment
-    no longer counts toward the balance.
+    The rent-period aggregate is recalculated (derived from payment records)
+    so the cancelled payment no longer counts toward the balance.
+    Lock is acquired before modifying the payment.
     """
     if payment.status == PaymentStatus.CANCELLED:
         raise DomainError('Payment is already cancelled.', code='already_cancelled')
 
+    # Lock the rent period row before changing payment status.
     period_id = payment.rent_period_id
     if period_id is not None:
         RentSchedule.objects.select_for_update().get(pk=period_id)
