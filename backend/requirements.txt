@@ -6,3 +6,8 @@ django-cors-headers==4.9.0
 django-environ==0.14.0
 djangorestframework==3.18.0
 drf-spectacular==0.30.0
+
+# Production / Docker
+psycopg2-binary==2.9.10
+gunicorn==23.0.0
+redis==5.2.1
