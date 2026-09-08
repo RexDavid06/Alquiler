@@ -2,3 +2,4 @@
 # Includes everything from requirements.txt plus dev tools
 
 -r requirements.txt
+pytest==8.3.4

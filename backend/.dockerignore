@@ -1,0 +1,46 @@
+# ============================================================
+# Alquiler Backend — Docker Ignore
+# ============================================================
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local database
+*.sqlite3
+db.sqlite3
+
+# Environment files (secrets)
+.env
+
+# Static / media (rebuilt in container)
+staticfiles/
+media/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+PROJECT_PHASES.md
+TASK.md
+
+# Dev / debug files
+count_paths.py
+count_tests.py

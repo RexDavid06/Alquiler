@@ -19,6 +19,7 @@ env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, ['localhost', '127.0.0.1', 'testserver']),
     DB_ENGINE=(str, 'sqlite'),
+    REDIS_URL=(str, ''),
 )
 
 # Read environment variables from the .env file if it exists.
@@ -218,6 +219,19 @@ LEASE_EXPIRY_REMINDER_SCHEDULE = {
     'before_days': [30, 7, 0],
     'after_days': [7, 14, 21, 28],
 }
+
+# Redis / caching
+REDIS_URL = env('REDIS_URL')
+
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'KEY_PREFIX': 'alquiler',
+            'TIMEOUT': 300,  # 5 minutes default
+        }
+    }
 
 # Default currency for the launch market.
 DEFAULT_CURRENCY = env('DEFAULT_CURRENCY', default='NGN')

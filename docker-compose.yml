@@ -1,0 +1,103 @@
+# ============================================================
+# Alquiler — Docker Compose (Phase 10A: Production Foundation)
+# ============================================================
+#
+# Usage:
+#   cp backend/.env.example backend/.env   # edit with real values
+#   docker compose build
+#   docker compose up -d
+#   docker compose exec web python manage.py migrate
+#   docker compose exec web python manage.py createsuperuser
+#
+# The application is available at http://localhost:8000
+# Health check: http://localhost:8000/api/v1/auth/health/
+
+services:
+  # ----------------------------------------------------------
+  # Django application
+  # ----------------------------------------------------------
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: alquiler-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override for Docker networking — point at the postgres container.
+      DB_ENGINE: postgres
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-alquiler}
+      DB_USER: ${POSTGRES_USER:-alquiler}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-alquiler_secret}
+      DB_SSLMODE: prefer
+      # Redis URL for caching and future queue backend.
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/auth/health/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ----------------------------------------------------------
+  # PostgreSQL database
+  # ----------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: alquiler-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alquiler}
+      POSTGRES_USER: ${POSTGRES_USER:-alquiler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alquiler_secret}
+    ports:
+      - "${DB_PORT_EXTERNAL:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alquiler} -d ${POSTGRES_DB:-alquiler}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------
+  # Redis (caching / future queue backend)
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: alquiler-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  static_files:
+    driver: local
+  media_files:
+    driver: local
