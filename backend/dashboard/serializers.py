@@ -9,7 +9,7 @@ class LandlordDashboardSerializer(serializers.Serializer):
     properties = serializers.DictField()
     units = serializers.DictField()
     leases = serializers.DictField()
-    revenue = serializers.DictField()
+    collected_rent = serializers.DictField()
     overdue_rent = serializers.DictField()
     upcoming_rent = serializers.DictField()
     lease_expiry_alerts = serializers.ListField()
@@ -25,12 +25,15 @@ class TenantDashboardSerializer(serializers.Serializer):
 
 
 class AdminDashboardSerializer(serializers.Serializer):
-    """Read-only platform admin dashboard KPIs."""
+    """Read-only platform admin dashboard KPIs — comprehensive."""
 
     users = serializers.DictField()
-    subscriptions = serializers.DictField()
     properties = serializers.DictField()
     units = serializers.DictField()
     leases = serializers.DictField()
-    revenue = serializers.DictField()
+    collected_rent = serializers.DictField()
+    outstanding_rent = serializers.DictField()
+    overdue_rent = serializers.DictField()
+    subscriptions = serializers.DictField()
+    growth_trends = serializers.DictField()
     system_health = serializers.DictField()

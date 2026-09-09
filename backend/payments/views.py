@@ -163,7 +163,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
             payment_method=data.get('payment_method'),
             reference=data.get('reference'),
             notes=data.get('notes'),
-            status=data.get('status'),
             rent_period=data.get('rent_period'),
         )
 

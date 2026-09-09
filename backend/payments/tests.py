@@ -822,22 +822,6 @@ class PaymentUpdateEdgeCases(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(period_status(self.periods[0]), 'PAID')
 
-    def test_update_payment_status_to_cancelled(self):
-        """Updating status to CANCELLED removes amount from balance."""
-        payment = make_payment(
-            self.landlord, self.tenant, self.lease, self.periods[0],
-            amount=Decimal('500000'), status=PaymentStatus.PAID,
-        )
-        self.assertEqual(paid_amount(self.periods[0]), Decimal('500000'))
-
-        resp = self.client.patch(
-            f'{self.url}{payment.id}/',
-            {'status': 'CANCELLED'},
-            **auth(self.landlord),
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(paid_amount(self.periods[0]), Decimal('0'))
-
 
 # ---------------------------------------------------------------------------
 # OpenAPI Schema Tests
@@ -861,3 +845,256 @@ class OpenAPISchemaTests(TestCase):
         self.assertTrue(any('/leases' in p for p in paths))
         self.assertTrue(any('/properties' in p for p in paths))
         self.assertTrue(any('/tenants' in p for p in paths))
+
+
+# ---------------------------------------------------------------------------
+# Phase 10B: record_payment() full_clean() Tests
+# ---------------------------------------------------------------------------
+
+class RecordPaymentValidationTests(TestCase):
+    """Verify record_payment() runs model validation via full_clean()."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('validation@example.com')
+        self.tenant = make_tenant('val-tenant@example.com')
+        self.prop = make_property(self.landlord, 'Validation Block')
+        self.unit = make_unit(self.prop, 'V1')
+        self.lease = make_lease(
+            self.landlord, self.tenant, self.prop, self.unit,
+            start_date=TODAY, expiry_date=IN_THREE_MONTHS,
+            rent_amount=500000,
+        )
+        self.period = self.lease.rent_schedule.first()
+
+    def test_valid_payment_creation_succeeds(self):
+        """Valid payment creation should succeed with full_clean()."""
+        from payments.services import record_payment
+        payment = record_payment(
+            landlord=self.landlord,
+            tenant=self.tenant,
+            lease=self.lease,
+            rent_period=self.period,
+            amount=Decimal('500000'),
+            currency='NGN',
+            payment_date=TODAY,
+            payment_method='BANK_TRANSFER',
+            status=PaymentStatus.PAID,
+            recorded_by=self.landlord,
+        )
+        self.assertIsNotNone(payment.pk)
+        self.assertEqual(payment.amount, Decimal('500000'))
+
+    def test_invalid_currency_rejected_by_full_clean(self):
+        """Invalid currency should be rejected by full_clean()."""
+        from payments.services import record_payment
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            record_payment(
+                landlord=self.landlord,
+                tenant=self.tenant,
+                lease=self.lease,
+                rent_period=self.period,
+                amount=Decimal('500000'),
+                currency='INVALID',  # Invalid: not 3 uppercase letters
+                payment_date=TODAY,
+                payment_method='BANK_TRANSFER',
+                status=PaymentStatus.PAID,
+                recorded_by=self.landlord,
+            )
+
+    def test_negative_amount_rejected_by_full_clean(self):
+        """Negative amount should be rejected by full_clean()."""
+        from payments.services import record_payment
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            record_payment(
+                landlord=self.landlord,
+                tenant=self.tenant,
+                lease=self.lease,
+                rent_period=self.period,
+                amount=Decimal('-100'),
+                currency='NGN',
+                payment_date=TODAY,
+                payment_method='BANK_TRANSFER',
+                status=PaymentStatus.PAID,
+                recorded_by=self.landlord,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Phase 10B: Payment Status Manipulation Prevention Tests
+# ---------------------------------------------------------------------------
+
+class PaymentStatusManipulationTests(TestCase):
+    """Verify that PATCH cannot arbitrarily change payment status."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('status-mgmt@example.com')
+        self.tenant = make_tenant('status-tenant@example.com')
+        self.prop = make_property(self.landlord, 'Status Block')
+        self.unit = make_unit(self.prop, 'S1')
+        self.lease = make_lease(
+            self.landlord, self.tenant, self.prop, self.unit,
+            start_date=TODAY, expiry_date=IN_THREE_MONTHS,
+            rent_amount=500000,
+        )
+        self.period = self.lease.rent_schedule.first()
+        self.url = '/api/v1/payments/'
+        self.payment = make_payment(
+            self.landlord, self.tenant, self.lease, self.period,
+            amount=Decimal('500000'), status=PaymentStatus.PAID,
+        )
+
+    def test_patch_cannot_change_status_to_cancelled(self):
+        """PATCH with status field should be ignored (status not in serializer)."""
+        resp = self.client.patch(
+            f'{self.url}{self.payment.id}/',
+            {'status': 'CANCELLED'},
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 200)
+        # Status should remain PAID, not CANCELLED
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, PaymentStatus.PAID)
+
+    def test_patch_cannot_change_status_to_pending(self):
+        """PATCH with status=PENDING should be ignored."""
+        resp = self.client.patch(
+            f'{self.url}{self.payment.id}/',
+            {'status': 'PENDING'},
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, PaymentStatus.PAID)
+
+    def test_patch_can_update_other_fields(self):
+        """PATCH should still work for non-status fields."""
+        resp = self.client.patch(
+            f'{self.url}{self.payment.id}/',
+            {'amount': '600000.00', 'notes': 'Updated via patch'},
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['amount'], '600000.00')
+        self.assertEqual(resp.data['notes'], 'Updated via patch')
+        # Status should remain unchanged
+        self.assertEqual(resp.data['status'], 'PAID')
+
+    def test_cancel_endpoint_still_works(self):
+        """Cancel action should still work through the dedicated endpoint."""
+        resp = self.client.post(
+            f'{self.url}{self.payment.id}/cancel/',
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['status'], 'CANCELLED')
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, PaymentStatus.CANCELLED)
+
+    def test_cannot_cancel_already_cancelled(self):
+        """Cannot cancel a payment that is already cancelled."""
+        self.payment.status = PaymentStatus.CANCELLED
+        self.payment.save(update_fields=['status'])
+        resp = self.client.post(
+            f'{self.url}{self.payment.id}/cancel/',
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10B: Payment Amount Ceiling Tests
+# ---------------------------------------------------------------------------
+
+class PaymentAmountCeilingTests(TestCase):
+    """Verify that payment amounts exceeding the business ceiling are rejected.
+
+    The application enforces a maximum payment amount of 50,000,000 NGN
+    (~$30,000 USD) at the serializer level. This covers even luxury properties
+    in Lagos while preventing accidental data corruption from mistyped amounts.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('ceiling@example.com')
+        self.tenant = make_tenant('ceiling-tenant@example.com')
+        self.property = Property.objects.create(
+            landlord=self.landlord, name='Ceiling Test Property',
+            property_type=PropertyType.APARTMENT,
+            address='12 Marine Road', city='Lagos', state='Lagos',
+            country='Nigeria', currency='NGN', description='Test',
+        )
+        self.unit = Unit.objects.create(property=self.property, name='Flat A')
+        self.lease = Lease.objects.create(
+            landlord=self.landlord, tenant=self.tenant,
+            property=self.property, unit=self.unit,
+            start_date=date(2025, 1, 1), expiry_date=date(2025, 12, 31),
+            rent_amount=500000, currency='NGN',
+            rent_frequency=RentFrequency.MONTHLY, rent_due_day=1,
+        )
+        self.url = '/api/v1/payments/'
+
+    def test_payment_at_ceiling_accepted(self):
+        """Payment of exactly 50,000,000 NGN is accepted."""
+        resp = self.client.post(
+            self.url, {
+                'tenant': self.tenant.id,
+                'lease': self.lease.id,
+                'amount': '50000000.00',
+                'currency': 'NGN',
+                'payment_date': '2025-06-15',
+                'payment_method': 'BANK_TRANSFER',
+            }, **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_payment_above_ceiling_rejected(self):
+        """Payment exceeding 50,000,000 NGN is rejected."""
+        resp = self.client.post(
+            self.url, {
+                'tenant': self.tenant.id,
+                'lease': self.lease.id,
+                'amount': '50000001.00',
+                'currency': 'NGN',
+                'payment_date': '2025-06-15',
+                'payment_method': 'BANK_TRANSFER',
+            }, **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 400)
+        # Error may be nested under 'errors' key or at top level
+        errors = resp.data.get('errors', resp.data)
+        self.assertIn('amount', errors)
+
+    def test_payment_just_below_ceiling_accepted(self):
+        """Payment of 49,999,999.99 NGN is accepted."""
+        resp = self.client.post(
+            self.url, {
+                'tenant': self.tenant.id,
+                'lease': self.lease.id,
+                'amount': '49999999.99',
+                'currency': 'NGN',
+                'payment_date': '2025-06-15',
+                'payment_method': 'BANK_TRANSFER',
+            }, **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_update_above_ceiling_rejected(self):
+        """PATCH updating amount above ceiling is rejected."""
+        payment = Payment.objects.create(
+            landlord=self.landlord, tenant=self.tenant,
+            lease=self.lease, amount=150000, currency='NGN',
+            payment_date=date(2025, 6, 15),
+            payment_method='BANK_TRANSFER',
+        )
+        resp = self.client.patch(
+            f'{self.url}{payment.id}/',
+            {'amount': '99999999.99'},
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 400)
+        errors = resp.data.get('errors', resp.data)
+        self.assertIn('amount', errors)

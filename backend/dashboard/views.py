@@ -32,6 +32,7 @@ class LandlordDashboardView(APIView):
     """Landlord dashboard KPIs."""
 
     permission_classes = [IsLandlord]
+    serializer_class = LandlordDashboardSerializer
 
     def get(self, request):
         start_date = request.query_params.get('start_date')
@@ -54,6 +55,7 @@ class TenantDashboardView(APIView):
     """Tenant dashboard KPIs."""
 
     permission_classes = [IsTenant]
+    serializer_class = TenantDashboardSerializer
 
     def get(self, request):
         start_date = request.query_params.get('start_date')
@@ -76,6 +78,7 @@ class AdminDashboardView(APIView):
     """Platform admin dashboard KPIs."""
 
     permission_classes = [IsPlatformAdmin]
+    serializer_class = AdminDashboardSerializer
 
     def get(self, request):
         start_date = request.query_params.get('start_date')
@@ -94,6 +97,7 @@ class LandlordExportView(APIView):
     """CSV export for landlord dashboard data."""
 
     permission_classes = [IsLandlord]
+    schema = None  # CSV endpoint — not part of OpenAPI schema.
 
     def get(self, request):
         data = landlord_export_data(request.user)
@@ -128,8 +132,8 @@ class LandlordExportView(APIView):
         writer.writerow([])
 
         # Revenue summary
-        writer.writerow(['=== REVENUE SUMMARY ==='])
-        writer.writerow(['Total Paid Revenue (NGN)', str(data['revenue'])])
+        writer.writerow(['=== COLLECTED RENT SUMMARY ==='])
+        writer.writerow(['Total Collected Rent (NGN)', str(data['collected_rent'])])
         writer.writerow([])
 
         # Overdue summary
@@ -157,6 +161,7 @@ class AdminExportView(APIView):
     """CSV export for admin dashboard data."""
 
     permission_classes = [IsPlatformAdmin]
+    schema = None  # CSV endpoint — not part of OpenAPI schema.
 
     def get(self, request):
         start_date = request.query_params.get('start_date')
@@ -190,9 +195,9 @@ class AdminExportView(APIView):
         writer.writerow(['Total Leases', data['leases']['total']])
         writer.writerow([])
 
-        writer.writerow(['=== REVENUE ==='])
-        writer.writerow(['Total Revenue (NGN)', data['revenue']['total']])
-        writer.writerow(['Payment Count', data['revenue']['payment_count']])
+        writer.writerow(['=== COLLECTED RENT ==='])
+        writer.writerow(['Total Collected Rent (NGN)', data['collected_rent']['total']])
+        writer.writerow(['Payment Count', data['collected_rent']['payment_count']])
         writer.writerow([])
 
         writer.writerow(['=== SYSTEM HEALTH ==='])

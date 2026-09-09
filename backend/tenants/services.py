@@ -202,6 +202,6 @@ def accept_invitation(token, *, first_name, last_name, phone, password):
     AuditLog.objects.create(
         actor=user, action='INVITATION_ACCEPTED',
         object_type='TenantInvitation', object_id=invitation.id,
-        detail={'invitation_token': token, 'email': invitation.email},
+        detail={'email': invitation.email},
     )
     return user, invitation

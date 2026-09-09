@@ -25,8 +25,14 @@ from .serializers import (
 
 
 def _issue_token(user):
-    token, _ = Token.objects.get_or_create(user=user)
-    return token.key
+    """Delete any existing token and issue a fresh one (rotation)."""
+    Token.objects.filter(user=user).delete()
+    return Token.objects.create(user=user).key
+
+
+def _set_throttle_scope(view_func, scope):
+    """Set throttle_scope on the DRF view class created by @api_view."""
+    view_func.cls.throttle_scope = scope
 
 
 @extend_schema(
@@ -55,6 +61,7 @@ def register(request):
         {'user': UserSerializer(user).data, 'token': _issue_token(user)},
         status=status.HTTP_201_CREATED,
     )
+_set_throttle_scope(register, 'register')
 
 
 @extend_schema(
@@ -72,6 +79,7 @@ def login(request):
         {'user': UserSerializer(user).data, 'token': _issue_token(user)},
         status=status.HTTP_200_OK,
     )
+_set_throttle_scope(login, 'login')
 
 
 @extend_schema(
@@ -167,6 +175,7 @@ def password_reset_request(request):
         recipient=user.email,
     )
     return Response({'detail': 'If that email exists, a reset link was sent.'})
+_set_throttle_scope(password_reset_request, 'password_reset')
 
 
 @extend_schema(

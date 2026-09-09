@@ -55,8 +55,17 @@ def get_subscription(landlord):
 
 
 def assert_can_add_property(landlord):
-    """Raise if the landlord's plan limit for properties is reached."""
+    """Raise if the landlord cannot add a property.
+
+    Checks both subscription status and plan limits.
+    """
     sub = get_subscription(landlord)
+    if sub.status not in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE):
+        raise ForbiddenError(
+            'Your subscription is not active. Please renew or upgrade '
+            'your plan to continue.',
+            code='subscription_not_active',
+        )
     if sub.property_count >= sub.plan.max_properties:
         raise ForbiddenError(
             f'Plan limit reached: the {sub.plan.name} plan allows up to '
@@ -67,8 +76,17 @@ def assert_can_add_property(landlord):
 
 
 def assert_can_add_tenant(landlord):
-    """Raise if the landlord's plan limit for active tenants is reached."""
+    """Raise if the landlord cannot add a tenant.
+
+    Checks both subscription status and plan limits.
+    """
     sub = get_subscription(landlord)
+    if sub.status not in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE):
+        raise ForbiddenError(
+            'Your subscription is not active. Please renew or upgrade '
+            'your plan to continue.',
+            code='subscription_not_active',
+        )
     if not sub.can_add_tenant:
         raise ForbiddenError(
             f'Plan limit reached: the {sub.plan.name} plan allows up to '
