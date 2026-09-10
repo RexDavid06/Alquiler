@@ -1,11 +1,12 @@
 """Platform administration API views.
 
-Provides platform-wide visibility and management for users, properties,
+Provides read-only platform-wide visibility for users, properties,
 subscriptions, and operational issues. All endpoints enforce PLATFORM_ADMIN
 authorization at the backend level.
 
-Write operations are limited to user suspend/reactivate and plan management —
-all other mutations go through existing domain services.
+Write operations are NOT exposed here — all mutations go through existing
+domain services (leases, payments, subscriptions). This module is strictly
+for operational inspection.
 """
 
 from datetime import timedelta
@@ -21,7 +22,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.exceptions import ConflictError
-from core.models import AccountStatus, AuditLog, Role, User
+from core.models import AccountStatus, Role, User
 from core.pagination import StandardPagination
 from leases.models import Lease, LeaseStatus
 from payments.models import Payment, PaymentStatus, RentSchedule
@@ -30,7 +31,6 @@ from properties.models import Property, PropertyStatus, Unit, UnitStatus
 from subscriptions.models import Plan, Subscription, SubscriptionStatus
 
 from .serializers import (
-    AdminAuditLogSerializer,
     AdminPlanSerializer,
     AdminPropertyDetailSerializer,
     AdminPropertySerializer,
@@ -90,55 +90,6 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(status=acct_status.upper())
 
         return qs
-
-    @action(detail=True, methods=['post'], url_path='suspend')
-    def suspend(self, request, pk=None):
-        """Suspend a user account. Prevents login and active sessions."""
-        user = self.get_object()
-
-        if user.is_platform_admin:
-            raise ConflictError('Cannot suspend a platform admin account.')
-
-        if user.status == AccountStatus.SUSPENDED:
-            raise ConflictError(f'User {user.email} is already suspended.')
-
-        user.status = AccountStatus.SUSPENDED
-        user.is_active = False
-        user.save(update_fields=['status', 'is_active', 'updated_at'])
-
-        AuditLog.objects.create(
-            actor=request.user,
-            action='USER_SUSPENDED',
-            object_type='user',
-            object_id=user.id,
-            detail={'email': user.email, 'role': user.role},
-        )
-
-        serializer = self.get_serializer(user)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'], url_path='reactivate')
-    def reactivate(self, request, pk=None):
-        """Reactivate a suspended or deactivated user account."""
-        user = self.get_object()
-
-        if user.status == AccountStatus.ACTIVE:
-            raise ConflictError(f'User {user.email} is already active.')
-
-        user.status = AccountStatus.ACTIVE
-        user.is_active = True
-        user.save(update_fields=['status', 'is_active', 'updated_at'])
-
-        AuditLog.objects.create(
-            actor=request.user,
-            action='USER_REACTIVATED',
-            object_type='user',
-            object_id=user.id,
-            detail={'email': user.email, 'role': user.role},
-        )
-
-        serializer = self.get_serializer(user)
-        return Response(serializer.data)
 
 
 # ---------------------------------------------------------------------------
@@ -442,190 +393,3 @@ class AdminIssuesView(APIView):
             'count': len(issues),
             'issues': issues,
         })
-
-
-# ---------------------------------------------------------------------------
-# Audit Log
-# ---------------------------------------------------------------------------
-
-class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """Platform-wide audit log listing for administrators.
-
-    Read-only access to all audit log entries with search, filtering,
-    and pagination. Supports filtering by action, actor, and object type.
-    """
-
-    serializer_class = AdminAuditLogSerializer
-    permission_classes = [IsPlatformAdminPermission]
-    pagination_class = StandardPagination
-    filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ['actor__email', 'actor__first_name', 'actor__last_name', 'action', 'object_type']
-    ordering_fields = ['action', 'object_type', 'created_at']
-    ordering = ['-created_at']
-
-    def get_queryset(self):
-        if getattr(self, 'swagger_fake_view', False):
-            return AuditLog.objects.none()
-        qs = AuditLog.objects.select_related('actor')
-
-        action_filter = self.request.query_params.get('action')
-        if action_filter:
-            qs = qs.filter(action=action_filter.upper())
-
-        actor_id = self.request.query_params.get('actor')
-        if actor_id:
-            qs = qs.filter(actor_id=actor_id)
-
-        object_type = self.request.query_params.get('object_type')
-        if object_type:
-            qs = qs.filter(object_type=object_type.lower())
-
-        return qs
-
-
-# ---------------------------------------------------------------------------
-# Recent Activity Feed
-# ---------------------------------------------------------------------------
-
-class AdminActivityFeedView(APIView):
-    """Platform-wide recent activity feed for administrators.
-
-    Aggregates recent events from multiple sources into a unified timeline:
-    - Audit log entries
-    - Recent payments
-    - Recent lease changes
-    - Recent user registrations
-    - Recent subscription changes
-
-    Returns the most recent activities sorted by timestamp (newest first).
-    """
-
-    permission_classes = [IsPlatformAdminPermission]
-
-    def get(self, request):
-        limit = min(int(request.query_params.get('limit', 50)), 100)
-        activities = []
-
-        # Audit log entries (most recent)
-        audit_logs = AuditLog.objects.select_related('actor').order_by('-created_at')[:limit]
-        for log in audit_logs:
-            activities.append({
-                'id': f'audit-{log.id}',
-                'type': 'audit_log',
-                'action': log.action,
-                'description': self._format_audit_action(log),
-                'actor_email': log.actor.email if log.actor else None,
-                'actor_name': log.actor.full_name if log.actor else None,
-                'entity_type': log.object_type,
-                'entity_id': log.object_id,
-                'timestamp': log.created_at.isoformat(),
-            })
-
-        # Recent payments (last 24 hours)
-        recent_payments = Payment.objects.select_related(
-            'tenant', 'landlord', 'lease'
-        ).order_by('-created_at')[:20]
-        for p in recent_payments:
-            activities.append({
-                'id': f'payment-{p.id}',
-                'type': 'payment',
-                'action': 'PAYMENT_RECORDED',
-                'description': f'{p.currency} {p.amount} payment from {p.tenant.full_name} — {p.status}',
-                'actor_email': p.landlord.email,
-                'actor_name': p.landlord.full_name,
-                'entity_type': 'payment',
-                'entity_id': p.id,
-                'timestamp': p.created_at.isoformat(),
-            })
-
-        # Recent lease changes (last 24 hours)
-        recent_leases = Lease.objects.select_related(
-            'tenant', 'landlord', 'property'
-        ).order_by('-created_at')[:20]
-        for l in recent_leases:
-            activities.append({
-                'id': f'lease-{l.id}',
-                'type': 'lease',
-                'action': 'LEASE_CREATED',
-                'description': f'Lease #{l.id} for {l.tenant.full_name} at {l.property.name}',
-                'actor_email': l.landlord.email,
-                'actor_name': l.landlord.full_name,
-                'entity_type': 'lease',
-                'entity_id': l.id,
-                'timestamp': l.created_at.isoformat(),
-            })
-
-        # Recent user registrations (last 24 hours)
-        recent_users = User.objects.order_by('-created_at')[:20]
-        for u in recent_users:
-            activities.append({
-                'id': f'user-{u.id}',
-                'type': 'user',
-                'action': 'USER_REGISTERED',
-                'description': f'{u.full_name} ({u.role}) registered',
-                'actor_email': u.email,
-                'actor_name': u.full_name,
-                'entity_type': 'user',
-                'entity_id': u.id,
-                'timestamp': u.created_at.isoformat(),
-            })
-
-        # Recent subscription changes (last 24 hours)
-        recent_subs = Subscription.objects.select_related(
-            'landlord', 'plan'
-        ).order_by('-created_at')[:20]
-        for s in recent_subs:
-            activities.append({
-                'id': f'subscription-{s.id}',
-                'type': 'subscription',
-                'action': 'SUBSCRIPTION_CHANGED',
-                'description': f'{s.landlord.full_name} — {s.plan.name} ({s.status})',
-                'actor_email': s.landlord.email,
-                'actor_name': s.landlord.full_name,
-                'entity_type': 'subscription',
-                'entity_id': s.id,
-                'timestamp': s.created_at.isoformat(),
-            })
-
-        # Sort by timestamp descending and limit
-        activities.sort(key=lambda x: x['timestamp'], reverse=True)
-        activities = activities[:limit]
-
-        return Response({
-            'count': len(activities),
-            'activities': activities,
-        })
-
-    def _format_audit_action(self, log):
-        """Format audit log action into human-readable description."""
-        action = log.action
-        obj_type = log.object_type
-        detail = log.detail or {}
-
-        if action == 'USER_SUSPENDED':
-            return f'User {detail.get("email", "")} suspended'
-        elif action == 'USER_REACTIVATED':
-            return f'User {detail.get("email", "")} reactivated'
-        elif action == 'INVITATION_CREATED':
-            return f'Invitation sent to {detail.get("email", "")}'
-        elif action == 'INVITATION_ACCEPTED':
-            return f'Invitation accepted by {detail.get("email", "")}'
-        elif action == 'LEASE_CREATED':
-            return f'New lease #{log.object_id} created'
-        elif action == 'LEASE_RENEWED':
-            return f'Lease #{log.object_id} renewed'
-        elif action == 'LEASE_TERMINATED':
-            return f'Lease #{log.object_id} terminated'
-        elif action == 'PAYMENT_CREATED':
-            return f'Payment #{log.object_id} recorded'
-        elif action == 'PAYMENT_UPDATED':
-            return f'Payment #{log.object_id} updated'
-        elif action == 'SUBSCRIPTION_CHANGED':
-            return f'Subscription changed to {detail.get("plan", "")}'
-        elif action == 'PROPERTY_CREATED':
-            return f'Property "{detail.get("name", "")}" created'
-        elif action == 'UNIT_CREATED':
-            return f'Unit "{detail.get("name", "")}" created'
-        elif action == 'ACCOUNT_CREATED':
-            return f'Account created for {detail.get("email", "")}'
-        return f'{action} on {obj_type}#{log.object_id}'

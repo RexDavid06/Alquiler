@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { getAdminDashboard, exportAdminDashboardCsv } from '../api/dashboard';
+import { getAdminDashboard } from '../api/dashboard';
 import type { AdminDashboardResponse, GrowthPoint, PaymentGrowthPoint } from '../api/types';
 import MetricCard from '../components/MetricCard';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -22,7 +22,6 @@ import {
   Activity,
   AlertTriangle,
   RefreshCw,
-  Download,
   Home,
   UserCheck,
   UserX,
@@ -258,7 +257,6 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState('all');
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [exporting, setExporting] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -278,18 +276,6 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const handleExport = useCallback(async () => {
-    setExporting(true);
-    try {
-      const { startDate, endDate } = getPeriodDates(period);
-      await exportAdminDashboardCsv(startDate, endDate);
-    } catch {
-      // Export failed silently
-    } finally {
-      setExporting(false);
-    }
-  }, [period]);
 
   if (loading && !data) return <LoadingSpinner message="Loading dashboard…" />;
   if (error && !data) return <ErrorState message={error} onRetry={fetchData} />;
@@ -340,16 +326,6 @@ export default function DashboardPage() {
             title="Refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          {/* Export CSV */}
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-            title="Export dashboard data as CSV"
-          >
-            <Download className={`h-4 w-4 ${exporting ? 'animate-spin' : ''}`} />
-            {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
         </div>
       </div>
