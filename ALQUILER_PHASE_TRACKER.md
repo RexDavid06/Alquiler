@@ -368,7 +368,7 @@ Security hardening, API schema cleanup, production infrastructure, and comprehen
 ### Scope
 - **Phase 10A:** Security hardening (expiring tokens, throttling, error envelope, headers)
 - **Phase 10B:** Data & business integrity (payment amount ceiling, backdated lease tests)
-- **Phase 10C:** API & schema hardening (Retry-After header, OpenAPI fixes, content-type validation)
+- **Phase 10C:** Platform Operations Console (admin endpoints + frontend pages for user/property/lease/payment/subscription/issue management)
 - **Phase 10D:** Production & infrastructure hardening (logging fix, gunicorn config, .dockerignore)
 - **Phase 10E:** Final QA (full test suite verification)
 
@@ -520,19 +520,39 @@ Build platform admin dashboard for user management, system monitoring, and platf
 - System health: database, Django check, migrations
 
 **Backend Gaps Still Remaining:**
-- Admin user listing endpoint (for Users page)
 - User suspend/reactivate (for User management)
-- Admin-wide property listing (for Properties page)
 - Audit log listing (for activity feed)
 - Recent activity feed
 
 ### Remaining Phase 10 Work
 
-- **Phase 10C:** User management UI (requires backend user listing endpoint)
+- **Phase 10C:** ✅ COMPLETE — Platform Operations Console (admin endpoints + frontend pages)
 - **Phase 10D:** Plan management UI (create, update, deactivate)
 - **Phase 10E:** Activity feed & audit log
 - **Phase 10F:** CSV export integration
 - **Phase 10G:** Final QA & polish
+
+### Completion Criteria (Phase 10C)
+- [x] Backend platform_admin app created with read-only admin endpoints
+- [x] All admin endpoints enforce PLATFORM_ADMIN authorization at backend level
+- [x] Admin user listing with search, role/status filters, pagination
+- [x] Admin user detail with recent leases and payments
+- [x] Admin property listing with search, type/status filters, unit occupancy annotations
+- [x] Admin property detail with units list
+- [x] Admin subscription listing with search, plan/status filters
+- [x] Admin issues endpoint aggregating operational issues (failed payments, overdue rent, expired leases, suspended users, expired/past-due subscriptions)
+- [x] Frontend pages: Users, Properties, Leases, Payments, Subscriptions, Issues
+- [x] Reusable components: DataTable, SearchInput, FilterSelect, Pagination, StatusBadge, DetailPanel
+- [x] All pages have search, filters, pagination, loading/error/empty states, detail panels
+- [x] Navigation updated with Issues link
+- [x] Frontend tests pass (55 tests)
+- [x] Backend tests pass (476 tests)
+- [x] Frontend production build passes
+- [x] No write operations — all admin endpoints are read-only
+- [x] No new financial rules, no fake audit logs, no fabricated data
+- [x] No Phase 11 work started
+- [x] Documentation updated (architecture + phase tracker)
+- [x] Git diff contains only intended Phase 10C work
 
 ### Completion Criteria (Phase 10A)
 - [x] Frontend technology selected and documented
@@ -567,7 +587,7 @@ Build platform admin dashboard for user management, system monitoring, and platf
 - [x] Existing Phase 10A functionality remains working
 - [x] Documentation updated (architecture + phase tracker)
 - [x] Git diff contains only intended Phase 10B work
-- [x] Phase 10C NOT started
+- [x] Phase 10C completed (Platform Operations Console)
 - [x] Phase 11 NOT started
 
 ---

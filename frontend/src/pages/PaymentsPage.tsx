@@ -1,98 +1,194 @@
 // =============================================================================
 // Alquiler Super User — Payments Page
 //
-// The Payments API supports PLATFORM_ADMIN access (all payments visible).
-// This page displays a table of all recorded rent payments.
+// Platform-wide payment listing: search, filter by status/lease/tenant,
+// pagination, detail view.
 // =============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { getPayments } from '../api/dashboard';
-import type { Payment } from '../api/types';
+import { getAdminPayments, getAdminPaymentDetail } from '../api/admin';
+import type { AdminPayment, PaginatedResponse } from '../api/types';
+import DataTable, { type Column } from '../components/DataTable';
+import SearchInput from '../components/SearchInput';
+import FilterSelect from '../components/FilterSelect';
+import Pagination from '../components/Pagination';
+import StatusBadge from '../components/StatusBadge';
+import DetailPanel, { DetailRow } from '../components/DetailPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorState from '../components/ErrorState';
 import EmptyState from '../components/EmptyState';
 import { CreditCard } from 'lucide-react';
 
-const STATUS_COLORS: Record<string, string> = {
-  PAID: 'bg-green-50 text-green-700',
-  PENDING: 'bg-amber-50 text-amber-700',
-  FAILED: 'bg-red-50 text-red-700',
-  CANCELLED: 'bg-gray-100 text-gray-600',
-};
+const STATUS_OPTIONS = [
+  { label: 'All Statuses', value: '' },
+  { label: 'Paid', value: 'PAID' },
+  { label: 'Pending', value: 'PENDING' },
+  { label: 'Failed', value: 'FAILED' },
+  { label: 'Cancelled', value: 'CANCELLED' },
+];
+
+const PAGE_SIZE = 20;
 
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [data, setData] = useState<PaginatedResponse<AdminPayment> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [selectedPayment, setSelectedPayment] = useState<AdminPayment | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getPayments();
-      setPayments(res);
+      const res = await getAdminPayments({
+        search: search || undefined,
+        status: status || undefined,
+        page,
+        page_size: PAGE_SIZE,
+      });
+      setData(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load payments.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, status, page]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  if (loading) return <LoadingSpinner message="Loading payments…" />;
-  if (error) return <ErrorState message={error} onRetry={fetchData} />;
+  const handleRowClick = async (payment: AdminPayment) => {
+    setDetailLoading(true);
+    try {
+      const detail = await getAdminPaymentDetail(payment.id);
+      setSelectedPayment(detail);
+    } catch {
+      // ignore
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const totalPages = data ? Math.ceil(data.count / PAGE_SIZE) : 0;
+
+  const columns: Column<AdminPayment>[] = [
+    {
+      key: 'id',
+      header: 'ID',
+      render: (p) => <span className="font-medium text-gray-900">{p.id}</span>,
+    },
+    {
+      key: 'tenant_name',
+      header: 'Tenant',
+      render: (p) => p.tenant_name ?? `#${p.tenant}`,
+    },
+    {
+      key: 'landlord_name',
+      header: 'Landlord',
+      render: (p) => p.landlord_name ?? `#${p.landlord}`,
+    },
+    {
+      key: 'lease',
+      header: 'Lease',
+      render: (p) => `#${p.lease}`,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      render: (p) => <span className="font-medium">₦{parseFloat(p.amount).toLocaleString()}</span>,
+    },
+    {
+      key: 'payment_date',
+      header: 'Date',
+      render: (p) => p.payment_date,
+    },
+    {
+      key: 'payment_method',
+      header: 'Method',
+      render: (p) => p.payment_method.replace('_', ' '),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (p) => <StatusBadge status={p.status} />,
+    },
+  ];
+
+  if (loading && !data) return <LoadingSpinner message="Loading payments…" />;
+  if (error && !data) return <ErrorState message={error} onRetry={fetchData} />;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
         <p className="mt-1 text-sm text-gray-500">
-          All recorded rent payments across the platform ({payments.length} total).
+          Platform-wide payment records and inspection.
         </p>
       </div>
 
-      {payments.length === 0 ? (
-        <EmptyState icon={CreditCard} title="No payments found" description="There are no recorded payments yet." />
-      ) : (
-        <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Landlord</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tenant</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lease</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {payments.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">{p.id}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.landlord}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.tenant}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.lease}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">₦{parseFloat(p.amount).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.payment_date}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{p.payment_method.replace('_', ' ')}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[p.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {p.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <SearchInput
+          value={search}
+          onChange={(v) => { setSearch(v); setPage(1); }}
+          placeholder="Search by tenant or reference…"
+          className="flex-1"
+        />
+        <FilterSelect
+          value={status}
+          onChange={(v) => { setStatus(v); setPage(1); }}
+          options={STATUS_OPTIONS}
+          label="Status"
+        />
+      </div>
+
+      {data && data.results.length === 0 ? (
+        <EmptyState icon={CreditCard} title="No payments found" description="No payments match your filters." />
+      ) : data ? (
+        <>
+          <DataTable
+            columns={columns}
+            data={data.results}
+            onRowClick={(p) => handleRowClick(p)}
+          />
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            totalItems={data.count}
+          />
+        </>
+      ) : null}
+
+      {selectedPayment && (
+        <DetailPanel title={`Payment #${selectedPayment.id}`} onClose={() => setSelectedPayment(null)}>
+          {detailLoading ? (
+            <LoadingSpinner message="Loading details…" />
+          ) : (
+            <div className="space-y-4">
+              <DetailRow label="ID" value={selectedPayment.id} />
+              <DetailRow label="Status" value={<StatusBadge status={selectedPayment.status} />} />
+              <DetailRow label="Amount" value={`₦${parseFloat(selectedPayment.amount).toLocaleString()}`} />
+              <DetailRow label="Currency" value={selectedPayment.currency} />
+              <DetailRow label="Payment Date" value={selectedPayment.payment_date} />
+              <DetailRow label="Method" value={selectedPayment.payment_method.replace('_', ' ')} />
+              <DetailRow label="Reference" value={selectedPayment.reference || '—'} />
+              <DetailRow label="Notes" value={selectedPayment.notes || '—'} />
+              <DetailRow label="Landlord" value={`#${selectedPayment.landlord}`} />
+              <DetailRow label="Tenant" value={`#${selectedPayment.tenant}`} />
+              <DetailRow label="Lease" value={`#${selectedPayment.lease}`} />
+              <DetailRow label="Rent Period" value={selectedPayment.rent_period ? `#${selectedPayment.rent_period}` : '—'} />
+              <DetailRow label="Gateway" value={selectedPayment.gateway || '—'} />
+              <DetailRow label="Gateway Ref" value={selectedPayment.gateway_reference || '—'} />
+              <DetailRow label="Verified" value={selectedPayment.verified ? 'Yes' : 'No'} />
+              <DetailRow label="Recorded By" value={`#${selectedPayment.recorded_by}`} />
+              <DetailRow label="Created" value={new Date(selectedPayment.created_at).toLocaleString()} />
+            </div>
+          )}
+        </DetailPanel>
       )}
     </div>
   );

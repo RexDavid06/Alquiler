@@ -1,7 +1,7 @@
 # ALQUILER — Architecture Blueprint
 
 > **Authoritative architectural reference** for the Alquiler rental management SaaS platform.
-> Created: 2026-09-09 | Last updated: 2026-09-09 (Phase 10B)
+> Created: 2026-09-09 | Last updated: 2026-09-09 (Phase 10C)
 
 ---
 
@@ -78,6 +78,7 @@ Tenant rent payments and SaaS subscription billing are entirely separate financi
 | `notifications` | Idempotent notification generation | Notification | generate_lease/rent_notifications, send_email |
 | `subscriptions` | SaaS billing and plan management | Plan, Subscription | upgrade/downgrade/cancel, trial expiry, quota enforcement |
 | `dashboard` | Analytics and CSV exports | (no models) | landlord_metrics, tenant_metrics, admin_metrics |
+| `platform_admin` | Platform operations console | (no models) | AdminUserViewSet, AdminPropertyViewSet, AdminSubscriptionViewSet, AdminIssuesView |
 | `config` | Settings and URL routing | (no models) | settings.py, urls.py |
 
 ### 3.2 Authentication & Authorization
@@ -369,12 +370,32 @@ frontend/
 - All queries use database aggregation (annotated SUM with FILTER — no N+1)
 - Growth trends use `TruncMonth` for efficient monthly grouping
 
+**Platform Operations Console (Phase 10C):**
+
+The Super User dashboard was extended into a full Safe Platform Operations & Administration Console with read-only access to platform-wide data:
+
+*Backend endpoints (all PLATFORM_ADMIN enforced, read-only):*
+- `GET /api/v1/admin/users/` — User listing with search, role/status filters, pagination
+- `GET /api/v1/admin/users/{id}/` — User detail with recent leases and payments
+- `GET /api/v1/admin/properties/` — Property listing with search, landlord/type/status filters, unit occupancy annotations
+- `GET /api/v1/admin/properties/{id}/` — Property detail with units list
+- `GET /api/v1/admin/subscriptions/` — Subscription listing with search, plan/status filters
+- `GET /api/v1/admin/issues/` — Operational issues aggregation (failed payments, overdue rent, expired leases, suspended users, expired/past-due subscriptions)
+
+*Frontend pages:*
+- `UsersPage` — User management with search, role/status filters, detail panel
+- `PropertiesPage` — Property management with search, type/status filters, unit occupancy display
+- `LeasesPage` — Lease listing with search, status filter, detail panel
+- `PaymentsPage` — Payment listing with search, status filter, detail panel
+- `SubscriptionsPage` — Subscription listing with search, plan/status filters, detail panel
+- `IssuesPage` — Operational issues dashboard with severity filtering and summary cards
+
+*Shared components:* `DataTable`, `SearchInput`, `FilterSelect`, `Pagination`, `StatusBadge`, `DetailPanel`
+
 **Remaining Phase 10 work:**
-- User management (view, suspend, reactivate)
 - Plan management UI (create, update, deactivate)
 - Recent activity feed
 - Audit log listing
-- Admin-wide property/unit listing
 
 ### 7.4 Security (Implemented)
 
@@ -393,9 +414,7 @@ The following backend capabilities are still missing for full Super User functio
 
 | Gap | Required For | Status |
 |-----|-------------|--------|
-| Admin user listing endpoint | Users page | Not implemented |
 | User suspend/reactivate | User management | Not implemented |
-| Admin-wide property listing | Properties page | Not implemented |
 | Audit log listing endpoint | Activity feed | Not implemented |
 | Recent activity feed | Dashboard | Not implemented |
 
