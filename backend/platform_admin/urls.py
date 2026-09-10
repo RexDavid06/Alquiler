@@ -4,8 +4,6 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    AdminActivityFeedView,
-    AdminAuditLogViewSet,
     AdminPlanViewSet,
     AdminPropertyViewSet,
     AdminSubscriptionViewSet,
@@ -20,11 +18,9 @@ router.register('users', AdminUserViewSet, basename='admin-user')
 router.register('properties', AdminPropertyViewSet, basename='admin-property')
 router.register('plans', AdminPlanViewSet, basename='admin-plan')
 router.register('subscriptions', AdminSubscriptionViewSet, basename='admin-subscription')
-router.register('audit-logs', AdminAuditLogViewSet, basename='admin-audit-log')
 
 urlpatterns = [
     path('', include(router.urls)),
     path('plans/<int:pk>/subscribers/', AdminPlanViewSet.as_view({'get': 'subscribers'}), name='admin-plan-subscribers'),
     path('issues/', AdminIssuesView.as_view(), name='admin-issues'),
-    path('activity/', AdminActivityFeedView.as_view(), name='admin-activity-feed'),
 ]

@@ -21,31 +21,6 @@ export async function getAdminDashboard(
 }
 
 // ---------------------------------------------------------------------------
-// CSV Export
-// ---------------------------------------------------------------------------
-
-export async function exportAdminDashboardCsv(
-  startDate?: string,
-  endDate?: string,
-): Promise<void> {
-  const params: Record<string, string> = {};
-  if (startDate) params.start_date = startDate;
-  if (endDate) params.end_date = endDate;
-  const res = await api.get('/dashboard/admin/export/', {
-    params,
-    responseType: 'blob',
-  });
-  const url = window.URL.createObjectURL(new Blob([res.data]));
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', 'admin_dashboard.csv');
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-}
-
-// ---------------------------------------------------------------------------
 // Plans
 // ---------------------------------------------------------------------------
 
