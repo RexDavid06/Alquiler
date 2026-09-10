@@ -8,6 +8,8 @@ Secrets must never be committed. See backend/.env.example.
 """
 
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -34,6 +36,13 @@ SECRET_KEY = env(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
 
+# Fail fast: refuse to start with a known insecure SECRET_KEY in production.
+if not DEBUG and SECRET_KEY.startswith('django-insecure-'):
+    raise ImproperlyConfigured(
+        'SECRET_KEY must be set to a secure value in production. '
+        'The default insecure key is not allowed when DEBUG=False.'
+    )
+
 ALLOWED_HOSTS = env('ALLOWED_HOSTS')
 
 # Application definition
@@ -59,6 +68,7 @@ INSTALLED_APPS = [
     'notifications',
     'subscriptions',
     'dashboard',
+    'platform_admin',
 ]
 
 MIDDLEWARE = [
@@ -141,7 +151,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # DRF configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'core.authentication.ExpiringTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -154,7 +164,20 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'core.exceptions.api_exception_handler',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'core.throttling.ConditionalScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'login': '10/minute',
+        'register': '5/hour',
+        'password_reset': '5/hour',
+    },
 }
+
+# Disable throttling in development/test so the test suite is not rate-limited.
+if DEBUG:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] = []
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {}
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Alquiler API',
@@ -164,6 +187,22 @@ SPECTACULAR_SETTINGS = {
     ),
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAuthenticated'],
+    # Resolve enum naming collisions for fields named "status" across models.
+    'ENUM_NAME_OVERRIDES': {
+        'AccountStatusEnum': 'core.models.AccountStatus',
+        'SubscriptionStatusEnum': 'subscriptions.models.SubscriptionStatus',
+        'LeaseStatusEnum': 'leases.models.LeaseStatus',
+        'PropertyStatusEnum': 'properties.models.PropertyStatus',
+        'UnitStatusEnum': 'properties.models.UnitStatus',
+        'PaymentStatusEnum': 'payments.models.PaymentStatus',
+        'PaymentMethodEnum': 'payments.models.PaymentMethod',
+        'RentFrequencyEnum': 'leases.models.RentFrequency',
+        'RentPeriodStatusEnum': 'payments.models.RentPeriodStatus',
+        'NotificationStatusEnum': 'notifications.models.NotificationStatus',
+        'NotificationTypeEnum': 'notifications.models.NotificationType',
+        'PlanTierEnum': 'subscriptions.models.PlanTier',
+    },
 }
 
 # CORS: allowed frontend origins.
@@ -174,6 +213,18 @@ CORS_ALLOWED_ORIGINS = env(
         'http://127.0.0.1:5173',
     ],
 )
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
@@ -242,6 +293,23 @@ SITE_URL = env('SITE_URL', default='http://localhost:5173')
 # Subscription trial duration (days). Override via env for different markets.
 TRIAL_DURATION_DAYS = env.int('TRIAL_DURATION_DAYS', default=14)
 
+# Phase 10A — Token expiry (days). Auth tokens older than this are rejected.
+AUTH_TOKEN_EXPIRY_DAYS = env.int('AUTH_TOKEN_EXPIRY_DAYS', default=7)
+
+# Phase 10A — Production security headers (only when DEBUG=False).
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
+    SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+        'SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True,
+    )
+    SECURE_HSTS_PRELOAD = env.bool('SECURE_HSTS_PRELOAD', default=True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Logging configuration
 LOG_LEVEL = env('LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO')
 
@@ -271,7 +339,7 @@ LOGGING = {
             'formatter': 'simple',
         },
         'production': {
-            'level': 'WARNING',
+            'level': LOG_LEVEL,
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },

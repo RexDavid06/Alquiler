@@ -702,3 +702,175 @@ class SubscriptionIsolationTest(TestCase):
         # Landlord B should still be active
         sub_b = get_subscription(self.landlord_b)
         self.assertNotEqual(sub_b.status, SubscriptionStatus.CANCELLED)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10B: Subscription Status Enforcement Tests
+# ---------------------------------------------------------------------------
+
+class SubscriptionStatusEnforcementTests(TestCase):
+    """Verify that cancelled/expired subscriptions cannot create resources."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('status-enforce@example.com')
+
+    def test_active_subscription_allows_property_creation(self):
+        """ACTIVE subscription should allow property creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.ACTIVE
+        sub.save(update_fields=['status'])
+        # Should not raise
+        from subscriptions.services import assert_can_add_property
+        assert_can_add_property(self.landlord)
+
+    def test_trial_subscription_allows_property_creation(self):
+        """TRIAL subscription should allow property creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.TRIAL
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_property
+        assert_can_add_property(self.landlord)
+
+    def test_cancelled_subscription_blocks_property_creation(self):
+        """CANCELLED subscription should block property creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.CANCELLED
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+
+    def test_expired_subscription_blocks_property_creation(self):
+        """EXPIRED subscription should block property creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.EXPIRED
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+
+    def test_past_due_subscription_blocks_property_creation(self):
+        """PAST_DUE subscription should block property creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.PAST_DUE
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+
+    def test_cancelled_subscription_blocks_tenant_creation(self):
+        """CANCELLED subscription should block tenant creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.CANCELLED
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_tenant
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_tenant(self.landlord)
+
+    def test_active_subscription_allows_tenant_creation(self):
+        """ACTIVE subscription should allow tenant creation."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.ACTIVE
+        sub.save(update_fields=['status'])
+        from subscriptions.services import assert_can_add_tenant
+        assert_can_add_tenant(self.landlord)
+
+    def test_numerical_limit_still_enforced(self):
+        """Numerical subscription limits should still work."""
+        sub = get_subscription(self.landlord)
+        sub.status = SubscriptionStatus.ACTIVE
+        sub.plan.max_properties = 1
+        sub.plan.save(update_fields=['max_properties'])
+        sub.save(update_fields=['status'])
+        # Create a property to hit the limit
+        Property.objects.create(
+            landlord=self.landlord, name='First Property',
+            property_type='APARTMENT', address='123 Main St',
+            city='Lagos', state='Lagos', country='Nigeria',
+        )
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10B: Archived Property Quota Tests
+# ---------------------------------------------------------------------------
+
+class ArchivedPropertyQuotaTests(TestCase):
+    """Verify that archived properties do not count toward quota."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('archived-quota@example.com')
+        self.sub = get_subscription(self.landlord)
+        self.sub.plan.max_properties = 2
+        self.sub.plan.save(update_fields=['max_properties'])
+
+    def _create_property(self, name='Test Property'):
+        return Property.objects.create(
+            landlord=self.landlord, name=name,
+            property_type='APARTMENT', address='123 Main St',
+            city='Lagos', state='Lagos', country='Nigeria',
+        )
+
+    def test_active_property_counts(self):
+        """Active property should count toward quota."""
+        prop = self._create_property('Active Property')
+        self.assertEqual(self.sub.property_count, 1)
+
+    def test_archived_property_does_not_count(self):
+        """Archived property should not count toward quota."""
+        prop = self._create_property('Archived Property')
+        prop.status = 'ARCHIVED'
+        prop.save(update_fields=['status'])
+        self.assertEqual(self.sub.property_count, 0)
+
+    def test_multiple_archived_properties_do_not_consume_quota(self):
+        """Multiple archived properties should not consume quota."""
+        for i in range(3):
+            prop = self._create_property(f'Archived Property {i}')
+            prop.status = 'ARCHIVED'
+            prop.save(update_fields=['status'])
+        self.assertEqual(self.sub.property_count, 0)
+
+    def test_active_plus_archived_count_only_active(self):
+        """Mix of active and archived should count only active."""
+        for i in range(2):
+            prop = self._create_property(f'Active Property {i}')
+        archived = self._create_property('Archived Property')
+        archived.status = 'ARCHIVED'
+        archived.save(update_fields=['status'])
+        self.assertEqual(self.sub.property_count, 2)
+
+    def test_subscription_limit_blocks_when_active_limit_reached(self):
+        """Limit should block when active properties reach max."""
+        self.sub.plan.max_properties = 1
+        self.sub.plan.save(update_fields=['max_properties'])
+        self._create_property('First Property')
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+
+    def test_archived_property_allows_new_creation(self):
+        """Archived property should free up quota for new creation."""
+        self.sub.plan.max_properties = 1
+        self.sub.plan.save(update_fields=['max_properties'])
+        prop = self._create_property('To Archive')
+        # Hit limit
+        from subscriptions.services import assert_can_add_property
+        from core.exceptions import ForbiddenError
+        with self.assertRaises(ForbiddenError):
+            assert_can_add_property(self.landlord)
+        # Archive the property
+        prop.status = 'ARCHIVED'
+        prop.save(update_fields=['status'])
+        # Now should be allowed
+        assert_can_add_property(self.landlord)

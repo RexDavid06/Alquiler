@@ -28,6 +28,7 @@ urlpatterns = [
     path(API_PREFIX + 'notifications/', include('notifications.urls')),
     path(API_PREFIX + 'subscriptions/', include('subscriptions.urls')),
     path(API_PREFIX + 'dashboard/', include('dashboard.urls')),
+    path(API_PREFIX + 'admin/', include('platform_admin.urls')),
     path(API_PREFIX, include(router.urls)),
     # Nested units: /api/v1/properties/{property_pk}/units/
     path(

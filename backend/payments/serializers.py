@@ -92,7 +92,7 @@ class PaymentCreateSerializer(serializers.Serializer):
     rent_period = serializers.PrimaryKeyRelatedField(
         queryset=RentSchedule.objects.all(), required=False, allow_null=True,
     )
-    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, max_value=50000000)
     currency = serializers.RegexField(r'^[A-Z]{3}$', default='NGN')
     payment_date = serializers.DateField()
     payment_method = serializers.ChoiceField(
@@ -163,10 +163,13 @@ class PaymentCreateSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class PaymentUpdateSerializer(serializers.Serializer):
-    """Partial update of a payment.  Only mutable fields are allowed."""
+    """Partial update of a payment.  Only mutable fields are allowed.
+
+    Status changes must go through the dedicated cancel endpoint.
+    """
 
     amount = serializers.DecimalField(
-        max_digits=14, decimal_places=2, min_value=0, required=False,
+        max_digits=14, decimal_places=2, min_value=0, max_value=50000000, required=False,
     )
     currency = serializers.RegexField(r'^[A-Z]{3}$', required=False)
     payment_date = serializers.DateField(required=False)
@@ -175,7 +178,6 @@ class PaymentUpdateSerializer(serializers.Serializer):
     )
     reference = serializers.CharField(max_length=200, required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
-    status = serializers.ChoiceField(choices=PaymentStatus.choices, required=False)
     rent_period = serializers.PrimaryKeyRelatedField(
         queryset=RentSchedule.objects.all(), required=False, allow_null=True,
     )
@@ -191,11 +193,6 @@ class PaymentUpdateSerializer(serializers.Serializer):
                 code='period_not_owned',
             )
         return period
-
-    def validate_status(self, value):
-        """Prevent clients from directly setting status to PAID via update.
-        Status changes should go through the cancel action instead."""
-        return value
 
     def validate(self, attrs):
         """Cross-field: if both rent_period and (implicitly) the payment's

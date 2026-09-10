@@ -112,6 +112,8 @@ class AuditLog(models.Model):
         ('PROPERTY_CREATED', 'Property created'),
         ('UNIT_CREATED', 'Unit created'),
         ('ACCOUNT_CREATED', 'Account created'),
+        ('USER_SUSPENDED', 'User suspended'),
+        ('USER_REACTIVATED', 'User reactivated'),
     ]
 
     actor = models.ForeignKey(

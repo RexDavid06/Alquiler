@@ -121,6 +121,6 @@ class Lease(models.Model):
         return self.status
 
     def days_remaining(self):
-        if self.status == LeaseStatus.TERMINATED:
+        if self.status in (LeaseStatus.TERMINATED, LeaseStatus.EXPIRED):
             return 0
         return (self.expiry_date - timezone.localdate()).days

@@ -259,7 +259,7 @@ def record_payment(*, landlord, tenant, lease, rent_period=None,
     else:
         locked = None
 
-    payment = Payment.objects.create(
+    payment = Payment(
         landlord=landlord,
         tenant=tenant,
         lease=lease,
@@ -273,6 +273,8 @@ def record_payment(*, landlord, tenant, lease, rent_period=None,
         status=status,
         recorded_by=recorded_by,
     )
+    payment.full_clean()
+    payment.save()
     return payment
 
 

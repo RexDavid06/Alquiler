@@ -1,10 +1,14 @@
 """Consistent, safe API error handling.
 
 Never leak stack traces, database errors, OR secrets to API clients.
+
+Phase 10C: Adds Retry-After header to 429 (Throttled) responses.
 """
 
+import math
+
 from rest_framework import status
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, Throttled
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
@@ -65,6 +69,13 @@ def api_exception_handler(exc, context):
             if 'errors' not in response.data and not isinstance(response.data.get('detail'), str):
                 payload['errors'] = response.data
         response.data = payload
+
+        # Phase 10C: Add Retry-After header for throttled responses.
+        if isinstance(exc, Throttled):
+            wait = getattr(exc, 'wait', None)
+            if wait is not None:
+                response['Retry-After'] = str(int(math.ceil(wait)))
+
         return response
 
     # Fallback: absorb unexpected errors. Do not leak internals.

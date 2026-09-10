@@ -216,13 +216,21 @@ class LoginApiTestCase(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(Token.objects.filter(user=self.user).exists())
 
-    def test_login_reuses_existing_token(self):
+    def test_login_rotates_token(self):
+        """Login should issue a fresh token and invalidate the old one."""
         old_token, _ = Token.objects.get_or_create(user=self.user)
+        old_key = old_token.key
         resp = self.client.post(self.url, {
             'email': 'landlord@example.com', 'password': 'pass12345',
         })
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data['token'], old_token.key)
+        new_key = resp.data['token']
+        # New token differs from old.
+        self.assertNotEqual(new_key, old_key)
+        # Old token no longer exists.
+        self.assertFalse(Token.objects.filter(key=old_key).exists())
+        # New token is valid.
+        self.assertTrue(Token.objects.filter(key=new_key).exists())
 
     def test_login_case_insensitive_email(self):
         resp = self.client.post(self.url, {

@@ -155,7 +155,12 @@ class Subscription(models.Model):
 
     @property
     def property_count(self):
-        return self.landlord.properties.count()
+        """Count of non-archived properties for this landlord.
+
+        Archived properties do not count toward the subscription quota.
+        """
+        from properties.models import PropertyStatus
+        return self.landlord.properties.exclude(status=PropertyStatus.ARCHIVED).count()
 
     @property
     def can_add_property(self):
