@@ -1,7 +1,8 @@
 """Core cross-cutting services.
 
 Provides a thin email-dispatch wrapper so that Phase 6 can route mail
-through the notification service without restructuring callers.
+through the notification service without restructuring callers, and a
+helper for writing audit log entries.
 """
 
 from django.conf import settings
@@ -24,4 +25,16 @@ def send_email(*, subject, message, recipient, html_message=None):
         recipient_list=[recipient],
         html_message=html_message,
         fail_silently=False,
+    )
+
+
+def log_audit(*, actor, action, object_type, object_id=None, detail=None):
+    """Create an immutable audit log entry."""
+    from .models import AuditLog
+    return AuditLog.objects.create(
+        actor=actor,
+        action=action,
+        object_type=object_type,
+        object_id=object_id,
+        detail=detail or {},
     )

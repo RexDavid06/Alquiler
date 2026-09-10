@@ -9,6 +9,7 @@ from .views import (
     AdminSubscriptionViewSet,
     AdminUserViewSet,
     AdminIssuesView,
+    AuditLogViewSet,
 )
 
 app_name = 'platform_admin'
@@ -18,6 +19,7 @@ router.register('users', AdminUserViewSet, basename='admin-user')
 router.register('properties', AdminPropertyViewSet, basename='admin-property')
 router.register('plans', AdminPlanViewSet, basename='admin-plan')
 router.register('subscriptions', AdminSubscriptionViewSet, basename='admin-subscription')
+router.register('audit-logs', AuditLogViewSet, basename='admin-audit-log')
 
 urlpatterns = [
     path('', include(router.urls)),

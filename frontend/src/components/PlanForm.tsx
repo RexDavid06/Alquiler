@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { useState, useEffect } from 'react';
-import { Save, X } from 'lucide-react';
+import { Save } from 'lucide-react';
 import type { AdminPlan } from '../api/types';
 
 interface PlanFormProps {

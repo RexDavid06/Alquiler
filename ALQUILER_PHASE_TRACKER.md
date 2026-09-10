@@ -1,7 +1,7 @@
 # ALQUILER — Phase Tracker
 
 > **Authoritative phase tracking document** for the Alquiler rental management SaaS platform.
-> Created: 2026-09-09 | Last updated: 2026-09-09 (Phase 10B)
+> Created: 2026-09-09 | Last updated: 2026-09-10 (Phase 10G)
 
 ---
 
@@ -19,7 +19,7 @@
 | 7 | Backend Integration / API Completion | ✅ COMPLETED | — |
 | 8 | Backend Hardening | ✅ COMPLETED | 86 |
 | 9 | Backend Final QA | ✅ COMPLETED | 501 |
-| 10 | Super User Web Application | Phase 10B ✅ | 24 frontend + 26 backend analytics |
+| 10 | Super User Web Application | Phase 10G ✅ COMPLETED | 568 backend + 55 frontend |
 | 11 | Landlord Mobile Application | PLANNED | — |
 | 12 | Client Integration & E2E Testing | PLANNED | — |
 | 13 | Production Deployment | PLANNED | — |
@@ -439,7 +439,7 @@ Final quality assurance, test verification, and release gate.
 
 ## Phase 10 — Super User Web Application
 
-> **Status:** Phase 10B ✅ COMPLETED
+> **Status:** Phase 10G ✅ COMPLETED
 
 ### Objective
 Build platform admin dashboard for user management, system monitoring, and platform analytics.
@@ -527,10 +527,67 @@ Build platform admin dashboard for user management, system monitoring, and platf
 ### Remaining Phase 10 Work
 
 - **Phase 10C:** ✅ COMPLETE — Platform Operations Console (admin endpoints + frontend pages)
-- **Phase 10D:** Plan management UI (create, update, deactivate)
-- **Phase 10E:** Activity feed & audit log
-- **Phase 10F:** CSV export integration
-- **Phase 10G:** Final QA & polish
+- **Phase 10D:** ✅ COMPLETE — Plan management UI (create, update, deactivate)
+- **Phase 10E:** ✅ COMPLETE — Activity feed & audit log
+- **Phase 10F:** ✅ COMPLETE — CSV export integration
+- **Phase 10G:** ✅ COMPLETE — Final QA & polish
+
+### Phase 10D — Plan Management UI (✅ COMPLETED)
+
+**Delivered:**
+- `frontend/src/pages/PlansPage.tsx` created — plan card grid, search, tier filter, create/edit modal
+- PlanCard grid shows all plans (inactive greyed out with existing PlanCard logic)
+- "Create Plan" button opens PlanForm overlay; card Edit opens the same form pre-filled
+- Activate/Deactivate actions call the existing backend admin plan endpoints
+- `App.tsx` — `/plans` route added
+- `Layout.tsx` — Plans nav item added (Dashboard, Users, Properties, Leases, Payments, Subscriptions, Plans, Issues, Activity, Notifications, System Health)
+
+**Evidence:**
+- `tsc --noEmit`: zero errors
+- `npm run test`: 55/55 passing
+- `npm run build`: SUCCESS
+
+### Phase 10E — Activity Feed & Audit Log (✅ COMPLETED)
+
+**Delivered:**
+- `backend/core/services.py` — new `log_audit()` helper (single INSERT, plain function)
+- Inline `AuditLog.objects.create()` calls replaced with `log_audit()` in `core/views.py`, `tenants/services.py`, `subscriptions/services.py`
+- Audit logging added to new lease mutations (`LEASE_CREATED`, `LEASE_RENEWED`, `LEASE_TERMINATED`) and payment mutations (`PAYMENT_CREATED`, `PAYMENT_UPDATED`)
+- `AuditLogSerializer` in `platform_admin/serializers.py` (actor email/name, JSON detail, timestamps)
+- `AuditLogViewSet` in `platform_admin/views.py` — read-only, PLATFORM_ADMIN enforced, search/filter by action/object_type/actor, pagination, ordering by -created_at
+- `audit-logs` route registered in `platform_admin/urls.py`
+- Frontend: `AuditLog` type, `getAdminAuditLogs()` API, `ActivityPage.tsx`, `/activity` route + nav item
+
+**No sensitive data in logs:** audit detail payloads contain only entity references (emails, IDs, amounts, statuses) — never passwords, tokens, or secrets.
+
+**Evidence:**
+- Backend: 568/568 tests passing (full suite)
+- Frontend: 55/55 tests, type check clean, production build SUCCESS
+
+### Phase 10F — CSV Export Integration (✅ COMPLETED)
+
+**Delivered:**
+- `frontend/src/api/dashboard.ts` — `exportAdminDashboardCsv(startDate?, endDate?)` returning a `Blob`
+- `frontend/src/pages/DashboardPage.tsx` — Export CSV button in the header next to refresh, wired to the existing backend `/dashboard/admin/export/` endpoint, respects the active period's date range, triggers a browser download of `admin_dashboard.csv`
+
+**Evidence:**
+- `tsc --noEmit`: zero errors
+- `npm run test`: 55/55 passing
+- `npm run build`: SUCCESS
+
+### Phase 10G — Final QA & Polish (✅ COMPLETED)
+
+**Delivered:**
+- Full backend suite: 568/568 passing (`python manage.py test`)
+- Frontend type check: zero errors (`tsc --noEmit`)
+- Frontend tests: 55/55 passing (`vitest run`)
+- Frontend production build: SUCCESS (`vite build`)
+- Backend migration check: no changes detected (`makemigrations --check --dry-run`)
+- Phase tracker updated (10D-10G marked complete, changelog entry added)
+
+**Evidence:**
+- `Ran 568 tests in 795.618s — OK`
+- `Test Files 5 passed (5), Tests 55 passed (55)`
 
 ### Completion Criteria (Phase 10C)
 - [x] Backend platform_admin app created with read-only admin endpoints
@@ -794,6 +851,7 @@ Final launch preparation, documentation, and go-live readiness.
 | 2026-09-09 | Initial creation — 15 phases (0-14) with mapped legacy phases | opencode |
 | 2026-09-09 | Phase 10A completed — React+TS foundation, auth, dashboard, routing | opencode |
 | 2026-09-09 | Phase 10B completed — Platform analytics, KPIs, charts, date filtering | opencode |
+| 2026-09-10 | Phase 10D-10G completed — Plans UI, Activity feed, CSV export, QA | opencode |
 
 ---
 
@@ -828,6 +886,8 @@ Alquiler/
 │   │   │   ├── LeasesPage.tsx
 │   │   │   ├── PaymentsPage.tsx
 │   │   │   ├── SubscriptionsPage.tsx
+│   │   │   ├── PlansPage.tsx       # Phase 10D plan management
+│   │   │   ├── ActivityPage.tsx    # Phase 10E audit feed
 │   │   │   ├── NotificationsPage.tsx
 │   │   │   ├── HealthPage.tsx
 │   │   │   └── NotFoundPage.tsx
@@ -849,7 +909,7 @@ Alquiler/
 │   │   ├── exceptions.py          # Custom exception handler
 │   │   ├── authentication.py      # ExpiringTokenAuthentication
 │   │   ├── throttling.py          # ConditionalScopedRateThrottle
-│   │   ├── services.py            # send_email()
+│   │   ├── services.py            # send_email(), log_audit()
 │   │   ├── pagination.py          # StandardPagination
 │   │   ├── views.py               # Auth endpoints
 │   │   ├── urls.py                # Auth routes

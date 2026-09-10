@@ -16,7 +16,9 @@ import PropertiesPage from './pages/PropertiesPage';
 import LeasesPage from './pages/LeasesPage';
 import PaymentsPage from './pages/PaymentsPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
+import PlansPage from './pages/PlansPage';
 import IssuesPage from './pages/IssuesPage';
+import ActivityPage from './pages/ActivityPage';
 import NotificationsPage from './pages/NotificationsPage';
 import HealthPage from './pages/HealthPage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -43,7 +45,9 @@ export default function App() {
             <Route path="leases" element={<LeasesPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="subscriptions" element={<SubscriptionsPage />} />
+            <Route path="plans" element={<PlansPage />} />
             <Route path="issues" element={<IssuesPage />} />
+            <Route path="activity" element={<ActivityPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="health" element={<HealthPage />} />
           </Route>

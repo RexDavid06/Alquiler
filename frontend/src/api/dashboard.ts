@@ -76,3 +76,18 @@ export async function getHealthCheck(): Promise<{ status: string; database: stri
   const res = await api.get<{ status: string; database: string }>('/auth/health/');
   return res.data;
 }
+
+// ---------------------------------------------------------------------------
+// CSV Export
+// ---------------------------------------------------------------------------
+
+export async function exportAdminDashboardCsv(
+  startDate?: string,
+  endDate?: string,
+): Promise<Blob> {
+  const params: Record<string, string> = {};
+  if (startDate) params.start_date = startDate;
+  if (endDate) params.end_date = endDate;
+  const res = await api.get('/dashboard/admin/export/', { params, responseType: 'blob' });
+  return res.data;
+}

@@ -18,6 +18,7 @@ import type {
   AdminIssuesResponse,
   AdminPlan,
   PlanSubscriber,
+  AuditLog,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -255,7 +256,7 @@ export async function updateAdminPlan(id: number, data: Partial<{
 }
 
 export async function deactivateAdminPlan(id: number): Promise<AdminPlan> {
-  const response = await api.delete(`/admin/plans/${id}/`);
+  const response = await api.post(`/admin/plans/${id}/deactivate/`);
   return response.data;
 }
 
@@ -270,4 +271,29 @@ export async function getAdminPlanSubscribers(planId: number, params?: {
 }): Promise<PaginatedResponse<PlanSubscriber>> {
   const response = await api.get(`/admin/plans/${planId}/subscribers/`, { params });
   return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Audit Logs
+// ---------------------------------------------------------------------------
+
+export async function getAdminAuditLogs(params?: {
+  search?: string;
+  action?: string;
+  object_type?: string;
+  actor?: number;
+  page?: number;
+  page_size?: number;
+  ordering?: string;
+}): Promise<PaginatedResponse<AuditLog>> {
+  const query: Record<string, string | number> = {};
+  if (params?.search) query.search = params.search;
+  if (params?.action) query.action = params.action;
+  if (params?.object_type) query.object_type = params.object_type;
+  if (params?.actor) query.actor = params.actor;
+  if (params?.page) query.page = params.page;
+  if (params?.page_size) query.page_size = params.page_size;
+  if (params?.ordering) query.ordering = params.ordering;
+  const res = await api.get('/admin/audit-logs/', { params: query });
+  return res.data;
 }

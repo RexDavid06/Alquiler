@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { getAdminDashboard } from '../api/dashboard';
+import { exportAdminDashboardCsv } from '../api/dashboard';
 import type { AdminDashboardResponse, GrowthPoint, PaymentGrowthPoint } from '../api/types';
 import MetricCard from '../components/MetricCard';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -25,6 +26,7 @@ import {
   Home,
   UserCheck,
   UserX,
+  Download,
 } from 'lucide-react';
 import {
   LineChart,
@@ -257,6 +259,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState('all');
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [exporting, setExporting] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -276,6 +279,26 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const { startDate, endDate } = getPeriodDates(period);
+      const blob = await exportAdminDashboardCsv(startDate, endDate);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'admin_dashboard.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (loading && !data) return <LoadingSpinner message="Loading dashboard…" />;
   if (error && !data) return <ErrorState message={error} onRetry={fetchData} />;
@@ -326,6 +349,15 @@ export default function DashboardPage() {
             title="Refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          {/* Export CSV */}
+          <button
+            onClick={handleExport}
+            disabled={loading || exporting}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Download className={`h-4 w-4 ${exporting ? 'animate-bounce' : ''}`} />
+            Export CSV
           </button>
         </div>
       </div>

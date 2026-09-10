@@ -12,7 +12,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.exceptions import ConflictError, DomainError, NotFoundError
-from core.models import AccountStatus, AuditLog, NotificationPreference, Role
+from core.models import AccountStatus, NotificationPreference, Role
+from core.services import log_audit
 from leases.services import unit_has_active_tenancy
 from subscriptions.services import assert_can_add_tenant
 
@@ -89,11 +90,7 @@ def create_invitation(*, landlord, email, property, unit,
         first_name=first_name, last_name=last_name, phone=phone,
         property=property, unit=unit,
     )
-    AuditLog.objects.create(
-        actor=landlord, action='INVITATION_CREATED',
-        object_type='TenantInvitation', object_id=invitation.id,
-        detail={'email': email, 'unit': unit.id},
-    )
+    log_audit(actor=landlord, action='INVITATION_CREATED', object_type='TenantInvitation', object_id=invitation.id, detail={'email': email, 'unit': unit.id})
     return invitation
 
 
@@ -199,9 +196,5 @@ def accept_invitation(token, *, first_name, last_name, phone, password):
     invitation.status = InvitationStatus.ACCEPTED
     invitation.save(update_fields=['accepted_by', 'accepted_at', 'status', 'updated_at'])
 
-    AuditLog.objects.create(
-        actor=user, action='INVITATION_ACCEPTED',
-        object_type='TenantInvitation', object_id=invitation.id,
-        detail={'email': invitation.email},
-    )
+    log_audit(actor=user, action='INVITATION_ACCEPTED', object_type='TenantInvitation', object_id=invitation.id, detail={'email': invitation.email})
     return user, invitation

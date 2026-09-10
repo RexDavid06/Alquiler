@@ -355,6 +355,22 @@ export interface PlanSubscriber {
 }
 
 // ---------------------------------------------------------------------------
+// Admin — Audit Log
+// ---------------------------------------------------------------------------
+
+export interface AuditLog {
+  id: number;
+  actor: number | null;
+  actor_email: string | null;
+  actor_name: string | null;
+  action: string;
+  object_type: string;
+  object_id: number | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Admin — Leases (enhanced)
 // ---------------------------------------------------------------------------
 

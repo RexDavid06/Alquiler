@@ -10,6 +10,7 @@ from django.utils import timezone
 from datetime import date
 
 from core.exceptions import ConflictError, DomainError
+from core.services import log_audit
 
 from properties.models import Unit, UnitStatus
 
@@ -176,6 +177,7 @@ def create_lease(*, landlord, tenant, property, unit, start_date, expiry_date,
     # Generate the rent schedule for this lease.
     from payments.services import generate_schedule
     generate_schedule(lease)
+    log_audit(actor=landlord, action='LEASE_CREATED', object_type='Lease', object_id=lease.id, detail={'property': property.id, 'unit': unit.id, 'tenant': tenant.id})
     return lease
 
 
@@ -210,6 +212,7 @@ def renew_lease(previous_lease, *, start_date, expiry_date, rent_amount,
         notes=notes,
         previous_lease=previous_lease,
     )
+    log_audit(actor=new_lease.landlord, action='LEASE_RENEWED', object_type='Lease', object_id=new_lease.id, detail={'previous_lease': previous_lease.id})
     return new_lease
 
 
@@ -222,6 +225,7 @@ def terminate_lease(lease, at=None):
     lease.terminated_at = at or timezone.now()
     lease.save(update_fields=['status', 'terminated_at', 'updated_at'])
     _sync_unit_occupancy(lease)
+    log_audit(actor=lease.landlord, action='LEASE_TERMINATED', object_type='Lease', object_id=lease.id, detail={'reason': ''})
     return lease
 
 

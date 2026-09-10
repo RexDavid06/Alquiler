@@ -22,7 +22,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.exceptions import ConflictError
-from core.models import AccountStatus, Role, User
+from core.models import AccountStatus, AuditLog, Role, User
 from core.pagination import StandardPagination
 from leases.models import Lease, LeaseStatus
 from payments.models import Payment, PaymentStatus, RentSchedule
@@ -37,6 +37,7 @@ from .serializers import (
     AdminSubscriptionSerializer,
     AdminUserDetailSerializer,
     AdminUserSerializer,
+    AuditLogSerializer,
 )
 
 
@@ -248,6 +249,41 @@ class AdminPlanViewSet(viewsets.ModelViewSet):
             for s in page
         ]
         return paginator.get_paginated_response(data)
+
+
+# ---------------------------------------------------------------------------
+# Audit Log
+# ---------------------------------------------------------------------------
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Platform-wide audit log listing for administrators."""
+
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsPlatformAdminPermission]
+    pagination_class = StandardPagination
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['action', 'object_type']
+    ordering_fields = ['action', 'object_type', 'created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return AuditLog.objects.none()
+        qs = AuditLog.objects.select_related('actor')
+
+        action = self.request.query_params.get('action')
+        if action:
+            qs = qs.filter(action=action)
+
+        object_type = self.request.query_params.get('object_type')
+        if object_type:
+            qs = qs.filter(object_type=object_type)
+
+        actor = self.request.query_params.get('actor')
+        if actor:
+            qs = qs.filter(actor_id=actor)
+
+        return qs
 
 
 # ---------------------------------------------------------------------------

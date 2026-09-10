@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Bell,
   HeartPulse,
+  Activity,
   LogOut,
   Menu,
   X,
@@ -31,7 +32,9 @@ const NAV_ITEMS = [
   { to: '/leases', label: 'Leases', icon: FileText },
   { to: '/payments', label: 'Payments', icon: CreditCard },
   { to: '/subscriptions', label: 'Subscriptions', icon: Layers },
+  { to: '/plans', label: 'Plans', icon: Layers },
   { to: '/issues', label: 'Issues', icon: AlertTriangle },
+  { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/health', label: 'System Health', icon: HeartPulse },
 ] as const;

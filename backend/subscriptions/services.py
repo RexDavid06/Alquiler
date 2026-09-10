@@ -151,15 +151,9 @@ def _validate_status_transition(current_status, target_status):
 
 def _log_subscription_change(landlord, action, detail):
     """Create an AuditLog entry for a subscription lifecycle event."""
-    from core.models import AuditLog
+    from core.services import log_audit
     sub = Subscription.objects.filter(landlord=landlord).first()
-    AuditLog.objects.create(
-        actor=landlord,
-        action=action,
-        object_type='Subscription',
-        object_id=sub.id if sub else None,
-        detail=detail,
-    )
+    log_audit(actor=landlord, action=action, object_type='Subscription', object_id=sub.id if sub else None, detail=detail)
 
 
 def get_available_plans():

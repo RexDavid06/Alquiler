@@ -26,6 +26,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from core.exceptions import ConflictError, DomainError
+from core.services import log_audit
 
 from .models import (
     Payment,
@@ -275,6 +276,7 @@ def record_payment(*, landlord, tenant, lease, rent_period=None,
     )
     payment.full_clean()
     payment.save()
+    log_audit(actor=payment.landlord, action='PAYMENT_CREATED', object_type='Payment', object_id=payment.id, detail={'amount': str(payment.amount), 'currency': payment.currency, 'status': payment.status})
     return payment
 
 
@@ -323,6 +325,7 @@ def update_payment(payment, *, amount=None, currency=None,
     payment.full_clean()
     payment.save()
 
+    log_audit(actor=payment.landlord, action='PAYMENT_UPDATED', object_type='Payment', object_id=payment.id, detail={'amount': str(payment.amount), 'currency': payment.currency, 'status': payment.status})
     return payment
 
 

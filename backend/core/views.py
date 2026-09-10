@@ -12,7 +12,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .exceptions import DomainError
-from .models import AccountStatus, AuditLog, NotificationPreference, User
+from .models import AccountStatus, NotificationPreference, User
 from .serializers import (
     ChangePasswordSerializer,
     LoginSerializer,
@@ -52,11 +52,8 @@ def register(request):
     from subscriptions.services import ensure_landlord_subscription
     ensure_landlord_subscription(user)
     NotificationPreference.objects.get_or_create(user=user)
-    AuditLog.objects.create(
-        actor=user, action='ACCOUNT_CREATED',
-        object_type='User', object_id=user.id,
-        detail={'role': user.role},
-    )
+    from core.services import log_audit
+    log_audit(actor=user, action='ACCOUNT_CREATED', object_type='User', object_id=user.id, detail={'role': user.role})
     return Response(
         {'user': UserSerializer(user).data, 'token': _issue_token(user)},
         status=status.HTTP_201_CREATED,
