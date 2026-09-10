@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '../contexts/AuthContext';
 import DashboardPage from '../pages/DashboardPage';
@@ -79,6 +80,7 @@ vi.mock('../api/dashboard', () => ({
   getLeases: vi.fn(),
   getPayments: vi.fn(),
   getNotifications: vi.fn(),
+  exportAdminDashboardCsv: vi.fn(),
 }));
 
 function renderDashboard() {
@@ -262,6 +264,73 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('4 active · 1 suspended')).toBeInTheDocument();
+    });
+  });
+
+  it('shows Export CSV button', async () => {
+    vi.mocked(dashboardApi.getAdminDashboard).mockResolvedValue(mockDashboardData);
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Export CSV/ })).toBeInTheDocument();
+    });
+  });
+
+  it('invokes the CSV export API when Export CSV is clicked', async () => {
+    vi.mocked(dashboardApi.getAdminDashboard).mockResolvedValue(mockDashboardData);
+    vi.mocked(dashboardApi.exportAdminDashboardCsv).mockResolvedValue(new Blob([]));
+    Object.defineProperty(URL, 'createObjectURL', {
+      writable: true,
+      value: vi.fn(() => 'blob:mock'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      writable: true,
+      value: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Platform Dashboard')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => {
+      expect(dashboardApi.exportAdminDashboardCsv).toHaveBeenCalled();
+    });
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it('passes the active period date range to the CSV export API', async () => {
+    vi.mocked(dashboardApi.getAdminDashboard).mockResolvedValue(mockDashboardData);
+    vi.mocked(dashboardApi.exportAdminDashboardCsv).mockResolvedValue(new Blob([]));
+    Object.defineProperty(URL, 'createObjectURL', {
+      writable: true,
+      value: vi.fn(() => 'blob:mock'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      writable: true,
+      value: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Platform Dashboard')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText('7 Days'));
+    await user.click(screen.getByRole('button', { name: /Export CSV/ }));
+
+    await waitFor(() => {
+      expect(dashboardApi.exportAdminDashboardCsv).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+      );
     });
   });
 });

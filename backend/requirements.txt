@@ -8,6 +8,7 @@ djangorestframework==3.18.0
 drf-spectacular==0.30.0
 
 # Production / Docker
+python-dateutil==2.9.0.post0
 psycopg2-binary==2.9.10
 gunicorn==23.0.0
 redis==5.2.1

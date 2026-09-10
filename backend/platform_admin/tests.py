@@ -14,9 +14,11 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from core.models import AccountStatus, Role, User
+from core.models import AccountStatus, AuditLog, Role, User
 from leases.models import Lease, LeaseStatus, RentFrequency
+from leases.services import create_lease
 from payments.models import Payment, PaymentStatus, RentSchedule
+from payments.services import record_payment
 from properties.models import Property, PropertyStatus, Unit, UnitStatus
 from subscriptions.models import Plan, PlanTier, Subscription, SubscriptionStatus
 from subscriptions.services import ensure_landlord_subscription
@@ -486,3 +488,155 @@ class AdminAuthorizationTests(TestCase):
                 res.status_code, status.HTTP_200_OK,
                 f'Admin should be allowed access to {url}',
             )
+
+
+# =====================================================================
+# Admin Audit Log Tests (Phase 10E)
+# =====================================================================
+
+class AdminAuditLogTests(TestCase):
+    """Test the admin audit-log listing endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_admin()
+        self.landlord = make_landlord()
+
+    def test_platform_admin_can_list_audit_logs(self):
+        AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=1,
+            detail={'email': 'tenant@example.com', 'unit': 1},
+        )
+        res = self.client.get(BASE + 'audit-logs/', **auth(self.admin))
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('results', res.data)
+        self.assertGreaterEqual(res.data['count'], 1)
+
+    def test_unauthenticated_denied(self):
+        res = self.client.get(BASE + 'audit-logs/')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_landlord_denied(self):
+        res = self.client.get(BASE + 'audit-logs/', **auth(self.landlord))
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_denied(self):
+        tenant = make_tenant()
+        res = self.client.get(BASE + 'audit-logs/', **auth(tenant))
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_ordering_newest_first(self):
+        older = AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=1,
+        )
+        newer = AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=2,
+        )
+        AuditLog.objects.filter(pk=older.pk).update(
+            created_at=timezone.now() - timedelta(hours=2),
+        )
+        AuditLog.objects.filter(pk=newer.pk).update(created_at=timezone.now())
+        res = self.client.get(
+            BASE + 'audit-logs/', {'action': 'INVITATION_CREATED'}, **auth(self.admin),
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        ids = [r['id'] for r in res.data['results']]
+        self.assertEqual(ids[0], newer.id)
+        self.assertEqual(ids[1], older.id)
+
+    def test_filter_by_action(self):
+        AuditLog.objects.create(
+            actor=self.admin, action='ACCOUNT_CREATED',
+            object_type='User', object_id=self.admin.id,
+        )
+        AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=1,
+        )
+        res = self.client.get(
+            BASE + 'audit-logs/', {'action': 'INVITATION_CREATED'}, **auth(self.admin),
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        actions = [r['action'] for r in res.data['results']]
+        self.assertTrue(all(a == 'INVITATION_CREATED' for a in actions))
+        self.assertGreaterEqual(len(actions), 1)
+
+    def test_filter_by_object_type(self):
+        AuditLog.objects.create(
+            actor=self.admin, action='ACCOUNT_CREATED',
+            object_type='User', object_id=self.admin.id,
+        )
+        AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=1,
+        )
+        res = self.client.get(
+            BASE + 'audit-logs/', {'object_type': 'TenantInvitation'}, **auth(self.admin),
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        object_types = [r['object_type'] for r in res.data['results']]
+        self.assertTrue(all(t == 'TenantInvitation' for t in object_types))
+        self.assertGreaterEqual(len(object_types), 1)
+
+    def test_detail_includes_actor_and_payload(self):
+        AuditLog.objects.create(
+            actor=self.landlord, action='INVITATION_CREATED',
+            object_type='TenantInvitation', object_id=1,
+            detail={'email': 'tenant@example.com', 'unit': 1},
+        )
+        res = self.client.get(
+            BASE + 'audit-logs/', {'action': 'INVITATION_CREATED'}, **auth(self.admin),
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        first = res.data['results'][0]
+        self.assertEqual(first['action'], 'INVITATION_CREATED')
+        self.assertEqual(first['actor_email'], 'landlord@example.com')
+        self.assertEqual(first['actor_name'], 'Test User')
+        self.assertEqual(first['object_type'], 'TenantInvitation')
+        self.assertEqual(first['detail']['email'], 'tenant@example.com')
+
+
+# =====================================================================
+# Audit Event Generation Tests (Phase 10E)
+# =====================================================================
+
+class AuditEventGenerationTests(TestCase):
+    """Verify domain mutations emit the expected audit entries."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord()
+        self.tenant = make_tenant()
+        self.prop, self.unit = make_property(self.landlord)
+
+    def test_create_lease_logs_lease_created(self):
+        lease = create_lease(
+            landlord=self.landlord, tenant=self.tenant,
+            property=self.prop, unit=self.unit,
+            start_date=TODAY, expiry_date=TODAY + timedelta(days=365),
+            rent_amount=Decimal('100000.00'), currency='NGN',
+            rent_frequency=RentFrequency.MONTHLY, rent_due_day=1,
+        )
+        log = AuditLog.objects.get(
+            action='LEASE_CREATED', object_type='Lease', object_id=lease.id,
+        )
+        self.assertEqual(log.actor, self.landlord)
+        self.assertEqual(log.detail['tenant'], self.tenant.id)
+        self.assertEqual(log.detail['unit'], self.unit.id)
+
+    def test_record_payment_logs_payment_created(self):
+        lease = make_lease(self.landlord, self.tenant, self.prop, self.unit)
+        payment = record_payment(
+            landlord=self.landlord, tenant=self.tenant, lease=lease,
+            amount=Decimal('50000.00'), currency='NGN', payment_date=TODAY,
+            payment_method='BANK_TRANSFER', reference='TXN-AUDIT',
+        )
+        log = AuditLog.objects.get(
+            action='PAYMENT_CREATED', object_type='Payment', object_id=payment.id,
+        )
+        self.assertEqual(log.actor, self.landlord)
+        self.assertEqual(log.detail['amount'], str(payment.amount))
+        self.assertEqual(log.detail['status'], PaymentStatus.PAID)

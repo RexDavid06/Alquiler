@@ -19,7 +19,7 @@
 | 7 | Backend Integration / API Completion | ✅ COMPLETED | — |
 | 8 | Backend Hardening | ✅ COMPLETED | 86 |
 | 9 | Backend Final QA | ✅ COMPLETED | 501 |
-| 10 | Super User Web Application | Phase 10G ✅ COMPLETED | 568 backend + 55 frontend |
+| 10 | Super User Web Application | Phase 10G ✅ COMPLETED | 578 backend + 71 frontend (incl. dedicated Phase 10D–10G feature tests) |
 | 11 | Landlord Mobile Application | PLANNED | — |
 | 12 | Client Integration & E2E Testing | PLANNED | — |
 | 13 | Production Deployment | PLANNED | — |
@@ -544,7 +544,7 @@ Build platform admin dashboard for user management, system monitoring, and platf
 
 **Evidence:**
 - `tsc --noEmit`: zero errors
-- `npm run test`: 55/55 passing
+- `npm run test`: full suite 71/71 passing, including dedicated `PlansPage.test.tsx` (6 tests: renders plans, create flow, edit flow, deactivate wiring, activate wiring)
 - `npm run build`: SUCCESS
 
 ### Phase 10E — Activity Feed & Audit Log (✅ COMPLETED)
@@ -561,8 +561,8 @@ Build platform admin dashboard for user management, system monitoring, and platf
 **No sensitive data in logs:** audit detail payloads contain only entity references (emails, IDs, amounts, statuses) — never passwords, tokens, or secrets.
 
 **Evidence:**
-- Backend: 568/568 tests passing (full suite)
-- Frontend: 55/55 tests, type check clean, production build SUCCESS
+- Backend: full suite 578/578 passing, including dedicated `AdminAuditLogTests` + `AuditEventGenerationTests` in `backend/platform_admin/tests.py` (authentication required, PLATFORM_ADMIN gating, ordering, action/object-type filtering, and LEASE_CREATED / PAYMENT_CREATED AuditLog entries verified)
+- Frontend: full suite 71/71 passing, including dedicated `ActivityPage.test.tsx` (7 tests: renders logs, filters, search, empty/loading states, detail panel)
 
 ### Phase 10F — CSV Export Integration (✅ COMPLETED)
 
@@ -572,22 +572,28 @@ Build platform admin dashboard for user management, system monitoring, and platf
 
 **Evidence:**
 - `tsc --noEmit`: zero errors
-- `npm run test`: 55/55 passing
+- `npm run test`: full suite 71/71 passing, including dedicated `DashboardPage.test.tsx` CSV export tests (Export CSV invokes the API; active period's date range is passed through)
 - `npm run build`: SUCCESS
 
 ### Phase 10G — Final QA & Polish (✅ COMPLETED)
 
 **Delivered:**
-- Full backend suite: 568/568 passing (`python manage.py test`)
+- Preservation commit `b6ea2fa` — "Complete Phase 10D-10G: Plans UI, Activity feed & audit log, CSV export"
+- Dependency fix: `python-dateutil==2.9.0.post0` added to `backend/requirements.txt` (required by `dateutil.relativedelta` in `backend/payments/services.py`)
+- Full backend suite: 578/578 passing (`python manage.py test`, includes 10 new Phase 10 feature tests)
+- Frontend tests: 71/71 passing (`vitest run`, includes 15 new Phase 10 feature tests)
 - Frontend type check: zero errors (`tsc --noEmit`)
-- Frontend tests: 55/55 passing (`vitest run`)
 - Frontend production build: SUCCESS (`vite build`)
 - Backend migration check: no changes detected (`makemigrations --check --dry-run`)
-- Phase tracker updated (10D-10G marked complete, changelog entry added)
 
 **Evidence:**
-- `Ran 568 tests in 795.618s — OK`
-- `Test Files 5 passed (5), Tests 55 passed (55)`
+- `Ran 578 tests in 1406.572s — OK`
+- `Test Files 7 passed (7), Tests 71 passed (71)`
+- `tsc --noEmit`: zero errors · `vite build`: SUCCESS · `makemigrations --check --dry-run`: No changes detected
+
+### Verification note (Post-phase-10D–10G review)
+- The original 568-backend / 55-frontend test counts reflected the pre-Phase-10D regression baseline only; they did NOT cover the new features.
+- Dedicated feature coverage was added in the Phase 10 finalization pass and is now incorporated in the full-suite counts above (578 backend / 71 frontend).
 
 ### Completion Criteria (Phase 10C)
 - [x] Backend platform_admin app created with read-only admin endpoints
