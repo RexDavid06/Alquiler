@@ -18,6 +18,8 @@ import type {
   AdminIssuesResponse,
   AdminPlan,
   PlanSubscriber,
+  AdminAuditLog,
+  AdminActivity,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,16 @@ export async function getAdminUserDetail(
   id: number,
 ): Promise<AdminUserDetail> {
   const res = await api.get<AdminUserDetail>(`/admin/users/${id}/`);
+  return res.data;
+}
+
+export async function suspendAdminUser(id: number): Promise<AdminUser> {
+  const res = await api.post<AdminUser>(`/admin/users/${id}/suspend/`);
+  return res.data;
+}
+
+export async function reactivateAdminUser(id: number): Promise<AdminUser> {
+  const res = await api.post<AdminUser>(`/admin/users/${id}/reactivate/`);
   return res.data;
 }
 
@@ -270,4 +282,46 @@ export async function getAdminPlanSubscribers(planId: number, params?: {
 }): Promise<PaginatedResponse<PlanSubscriber>> {
   const response = await api.get(`/admin/plans/${planId}/subscribers/`, { params });
   return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Admin Audit Logs
+// ---------------------------------------------------------------------------
+
+export interface AuditLogQueryParams {
+  search?: string;
+  action?: string;
+  actor?: number;
+  object_type?: string;
+  page?: number;
+  page_size?: number;
+  ordering?: string;
+}
+
+export async function getAdminAuditLogs(
+  params: AuditLogQueryParams = {},
+): Promise<PaginatedResponse<AdminAuditLog>> {
+  const query: Record<string, string | number> = {};
+  if (params.search) query.search = params.search;
+  if (params.action) query.action = params.action;
+  if (params.actor) query.actor = params.actor;
+  if (params.object_type) query.object_type = params.object_type;
+  if (params.page) query.page = params.page;
+  if (params.page_size) query.page_size = params.page_size;
+  if (params.ordering) query.ordering = params.ordering;
+  const res = await api.get<PaginatedResponse<AdminAuditLog>>('/admin/audit-logs/', { params: query });
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Admin Activity Feed
+// ---------------------------------------------------------------------------
+
+export async function getAdminActivityFeed(
+  limit: number = 50,
+): Promise<{ count: number; activities: AdminActivity[] }> {
+  const res = await api.get<{ count: number; activities: AdminActivity[] }>('/admin/activity/', {
+    params: { limit },
+  });
+  return res.data;
 }

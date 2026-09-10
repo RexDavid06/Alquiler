@@ -448,6 +448,43 @@ export interface AdminIssuesResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Admin — Audit Log
+// ---------------------------------------------------------------------------
+
+export interface AdminAuditLog {
+  id: number;
+  actor: number | null;
+  actor_email: string | null;
+  actor_name: string | null;
+  action: string;
+  object_type: string;
+  object_id: number | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Admin — Activity Feed
+// ---------------------------------------------------------------------------
+
+export interface AdminActivity {
+  id: string;
+  type: 'audit_log' | 'payment' | 'lease' | 'user' | 'subscription';
+  action: string;
+  description: string;
+  actor_email: string | null;
+  actor_name: string | null;
+  entity_type: string;
+  entity_id: number | null;
+  timestamp: string;
+}
+
+export interface AdminActivityFeedResponse {
+  count: number;
+  activities: AdminActivity[];
+}
+
+// ---------------------------------------------------------------------------
 // Generic Paginated Response
 // ---------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ are defined here — all mutations go through existing domain services.
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from core.models import Role
+from core.models import AuditLog, Role
 from leases.models import Lease, LeaseStatus
 from payments.models import Payment, PaymentStatus, RentSchedule
 from payments.services import paid_amount, period_status, remaining_amount
@@ -254,3 +254,27 @@ class OperationalIssueSerializer(serializers.Serializer):
     entity_id = serializers.IntegerField()
     related_url = serializers.CharField(required=False, allow_blank=True)
     created_at = serializers.CharField()
+
+
+# ---------------------------------------------------------------------------
+# Audit Log
+# ---------------------------------------------------------------------------
+
+class AdminAuditLogSerializer(serializers.ModelSerializer):
+    """Platform-wide audit log listing for admins."""
+
+    actor_email = serializers.EmailField(source='actor.email', read_only=True, default=None)
+    actor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id', 'actor', 'actor_email', 'actor_name',
+            'action', 'object_type', 'object_id', 'detail', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        if obj.actor:
+            return obj.actor.full_name
+        return None

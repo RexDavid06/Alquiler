@@ -6,7 +6,7 @@
 // =============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { getAdminUsers, getAdminUserDetail } from '../api/admin';
+import { getAdminUsers, getAdminUserDetail, suspendAdminUser, reactivateAdminUser } from '../api/admin';
 import type { AdminUser, AdminUserDetail, PaginatedResponse } from '../api/types';
 import DataTable, { type Column } from '../components/DataTable';
 import SearchInput from '../components/SearchInput';
@@ -17,7 +17,8 @@ import DetailPanel, { DetailRow } from '../components/DetailPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorState from '../components/ErrorState';
 import EmptyState from '../components/EmptyState';
-import { Users } from 'lucide-react';
+import ConfirmActionDialog from '../components/ConfirmActionDialog';
+import { Users, UserX, UserCheck } from 'lucide-react';
 
 const ROLE_OPTIONS = [
   { label: 'All Roles', value: '' },
@@ -46,6 +47,11 @@ export default function UsersPage() {
   const [page, setPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState<AdminUserDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: 'suspend' | 'reactivate';
+    user: AdminUserDetail;
+  } | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -83,6 +89,36 @@ export default function UsersPage() {
   };
 
   const totalPages = data ? Math.ceil(data.count / PAGE_SIZE) : 0;
+
+  const handleSuspend = async () => {
+    if (!confirmAction || confirmAction.type !== 'suspend') return;
+    setActionLoading(true);
+    try {
+      await suspendAdminUser(confirmAction.user.id);
+      setConfirmAction(null);
+      setSelectedUser(null);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to suspend user.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReactivate = async () => {
+    if (!confirmAction || confirmAction.type !== 'reactivate') return;
+    setActionLoading(true);
+    try {
+      await reactivateAdminUser(confirmAction.user.id);
+      setConfirmAction(null);
+      setSelectedUser(null);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reactivate user.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const columns: Column<AdminUser>[] = [
     {
@@ -197,6 +233,52 @@ export default function UsersPage() {
                 <DetailRow label="Subscription" value={<StatusBadge status={selectedUser.subscription_status} />} />
               )}
 
+              {/* Action Buttons */}
+              {selectedUser.role !== 'PLATFORM_ADMIN' && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  {selectedUser.status === 'SUSPENDED' || selectedUser.status === 'DEACTIVATED' ? (
+                    <button
+                      onClick={() => setConfirmAction({ type: 'reactivate', user: selectedUser })}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                      <UserCheck className="h-4 w-4 mr-2" />
+                      Reactivate User
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmAction({ type: 'suspend', user: selectedUser })}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                    >
+                      <UserX className="h-4 w-4 mr-2" />
+                      Suspend User
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              {selectedUser.role !== 'PLATFORM_ADMIN' && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  {selectedUser.status === 'SUSPENDED' || selectedUser.status === 'DEACTIVATED' ? (
+                    <button
+                      onClick={() => setConfirmAction({ type: 'reactivate', user: selectedUser })}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                      <UserCheck className="h-4 w-4 mr-2" />
+                      Reactivate User
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmAction({ type: 'suspend', user: selectedUser })}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                    >
+                      <UserX className="h-4 w-4 mr-2" />
+                      Suspend User
+                    </button>
+                  )}
+                </div>
+              )}
+
               {selectedUser.recent_leases.length > 0 && (
                 <div className="mt-6">
                   <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Recent Leases</h3>
@@ -237,6 +319,22 @@ export default function UsersPage() {
           )}
         </DetailPanel>
       )}
+
+      {/* Confirm Action Dialog */}
+      <ConfirmActionDialog
+        isOpen={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={confirmAction?.type === 'suspend' ? handleSuspend : handleReactivate}
+        title={confirmAction?.type === 'suspend' ? 'Suspend User' : 'Reactivate User'}
+        message={
+          confirmAction?.type === 'suspend'
+            ? `Are you sure you want to suspend ${confirmAction.user.full_name}? This will prevent them from logging in.`
+            : `Are you sure you want to reactivate ${confirmAction?.user.full_name}? This will restore their access.`
+        }
+        confirmLabel={confirmAction?.type === 'suspend' ? 'Suspend' : 'Reactivate'}
+        confirmVariant={confirmAction?.type === 'suspend' ? 'danger' : 'success'}
+        loading={actionLoading}
+      />
     </div>
   );
 }
