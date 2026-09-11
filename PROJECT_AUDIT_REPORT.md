@@ -277,7 +277,7 @@ None.
 
 ## Phase 10 Final Verification Report
 
-**Date:** 2026-09-10
+**Date:** 2026-09-10 | **Re-verified:** 2026-09-11
 
 ### Preservation commit
 
@@ -296,22 +296,29 @@ None.
 | Frontend | `frontend/src/test/ActivityPage.test.tsx` | 7 tests: renders logs, filters, search, empty/loading states, detail panel |
 | Frontend | `frontend/src/test/DashboardPage.test.tsx` | 2 CSV-export tests: Export CSV invokes `exportAdminDashboardCsv`; active period date range passed through |
 
-### Verification results
+### Verification results (fresh run, 2026-09-11)
 
 | Check | Command | Result |
 |-------|---------|--------|
-| Backend full suite | `python manage.py test` | 578/578 OK (`Ran 578 tests in 1406.572s`) |
+| Backend full suite | `python manage.py test` | 578/578 OK (`Ran 578 tests in 1904.185s`) |
+| Backend dedicated Phase 10D–10G tests | `python manage.py test platform_admin.tests.AdminAuditLogTests platform_admin.tests.AuditEventGenerationTests` | 10/10 OK (auth required, PLATFORM_ADMIN gating, ordering, filters, LEASE_CREATED/PAYMENT_CREATED AuditLog creation) |
 | Migration check | `python manage.py makemigrations --check --dry-run` | No changes detected |
-| Frontend full suite | `vitest run` | 71/71 OK (7 files) |
+| Frontend full suite | `vitest run --no-file-parallelism` | 71/71 OK (7 files, incl. 15 dedicated Phase 10 feature tests) |
 | TypeScript typecheck | `tsc --noEmit` | zero errors |
-| Production build | `vite build` | SUCCESS |
+| Production build | `npm run build` (`tsc -b && vite build`) | SUCCESS |
 | Git hygiene | `git status` / `git diff` | only intended files; `task.md`/`CURRENT_PROJECT_STATUS.md` uncommitted |
 | Docker config | `docker-compose.yml` → `backend/Dockerfile` (`pip install -r requirements.txt`) | valid, unchanged apart from the added dependency line |
+
+### Build fix (test types)
+
+`npm run build` runs `tsc -b`, which type-checks `src/test/*.tsx`. The committed `PlansPage.test.tsx` passed `exact: true` inside `getByRole` options — a valid runtime option for name matching but one not declared on `ByRoleOptions` in the installed `@testing-library/dom` types, so the strict build failed. Fixed by using regex name matchers (`{ name: /^Edit$/ }`, etc.), which is semantically identical. Tests still 71/71 after the fix. (The originally recorded "vite build SUCCESS" was a plain `vite build`, which skips `tsc`.)
 
 ### Remaining warnings / issues
 
 - Vite bundle-size warning: main chunk > 500 kB after minification (pre-existing; code-splitting is a future optimisation).
 - Pre-existing `drf-spectacular` schema naming warning for `role` fields and unresolvable type hints (`get_recent_leases`/`get_recent_payments`) — non-blocking.
+- Pre-existing `AdminIssuesView` missing `serializer_class` (drf-spectacular graceful fallback) — non-blocking, already filed in the audit's low-severity findings.
+- Frontend tests: the default vitest parallel worker pool intermittently fails to start a worker on this machine (forks timeout); sequential run (`--no-file-parallelism`) is stable at 71/71. Environment flake, not a test failure.
 
 ### Conclusion
 

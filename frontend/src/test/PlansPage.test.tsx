@@ -152,7 +152,7 @@ describe('PlansPage', () => {
       expect(screen.getByText('Entry level plan')).toBeInTheDocument();
     });
 
-    const editButtons = screen.getAllByRole('button', { name: 'Edit', exact: true });
+    const editButtons = screen.getAllByRole('button', { name: /^Edit$/ });
     await user.click(editButtons[0]);
 
     const nameInput = screen.getByPlaceholderText('e.g. Professional');
@@ -179,7 +179,7 @@ describe('PlansPage', () => {
       expect(screen.getByText('Entry level plan')).toBeInTheDocument();
     });
 
-    const deactivateButton = screen.getByRole('button', { name: 'Deactivate', exact: true });
+    const deactivateButton = screen.getByRole('button', { name: /^Deactivate$/ });
     await user.click(deactivateButton);
 
     await waitFor(() => {
@@ -194,7 +194,7 @@ describe('PlansPage', () => {
       expect(screen.getByText('Entry level plan')).toBeInTheDocument();
     });
 
-    const activateButton = screen.getByRole('button', { name: 'Activate', exact: true });
+    const activateButton = screen.getByRole('button', { name: /^Activate$/ });
     await user.click(activateButton);
 
     await waitFor(() => {
