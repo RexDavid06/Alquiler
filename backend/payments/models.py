@@ -53,6 +53,10 @@ class Payment(models.Model):
     )
     reference = models.CharField(max_length=200, blank=True)
     notes = models.TextField(blank=True)
+    idempotency_key = models.CharField(
+        max_length=64, null=True, blank=True,
+        help_text='Client-generated key making POST /payments idempotent.',
+    )
     status = models.CharField(
         max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PAID,
     )
@@ -85,6 +89,10 @@ class Payment(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gte=0),
                 name='payment_amount_non_negative',
+            ),
+            models.UniqueConstraint(
+                fields=['landlord', 'idempotency_key'],
+                name='uniq_landlord_idempotency_key',
             ),
         ]
 

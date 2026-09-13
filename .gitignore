@@ -17,6 +17,10 @@ db.sqlite3
 staticfiles/
 media/
 
+# Runtime artifacts / logs
+*.log
+runserver.*
+
 # Node / frontend
 node_modules/
 dist/

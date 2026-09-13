@@ -6,6 +6,7 @@ cross-cutting helpers used by all domain apps.
 """
 
 from datetime import timedelta
+import secrets
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
@@ -84,6 +85,86 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.status = AccountStatus.ACTIVE
         self.is_active = True
         self.save(update_fields=['status', 'is_active', 'updated_at'])
+
+
+class Token(models.Model):
+    """A bearer access token, one per device (Phase 11A).
+
+    Replaces DRF's ``rest_framework.authtoken.Token``, whose unique
+    ``user`` constraint capped the system at ONE token per user and made
+    independent, per-device sessions impossible.  ``key``, ``created``,
+    and ``user`` keep DRF's shape so ``ExpiringTokenAuthentication`` and
+    existing ``Token <key>`` clients are unaffected.
+    """
+
+    key = models.CharField(max_length=40, primary_key=True, verbose_name='Key')
+    created = models.DateTimeField(auto_now_add=True, verbose_name='Created')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='auth_token', verbose_name='User',
+    )
+
+    class Meta:
+        verbose_name = 'Token'
+        verbose_name_plural = 'Tokens'
+        ordering = ['-created']
+
+    def save(self, *args, **kwargs):
+        if not self.key:
+            self.key = self.generate_key()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def generate_key(cls):
+        return secrets.token_hex(20)
+
+    def __str__(self):
+        return self.key
+
+
+class DeviceSession(models.Model):
+    """One authenticated device for a user (Phase 11A multi-device auth).
+
+    Pairs a short-lived access token (``core.Token``) with a rotating,
+    hashed refresh credential.  A user may hold many sessions (one per
+    device) at once; each session is revoked independently.  Logging in
+    from a second device never invalidates the first.
+
+    The refresh credential is stored only as a SHA-256 hash and rotates on
+    every use, so a rotated-out credential cannot be replayed (reuse after
+    rotation revokes the whole session).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='device_sessions',
+    )
+    access_token = models.OneToOneField(
+        'core.Token', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='device_session',
+        help_text='Short-lived access token for this device. Deleted on expiry/logout.',
+    )
+    device_id = models.CharField(max_length=64)
+    device_name = models.CharField(max_length=100, default='')
+    refresh_token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    previous_refresh_token_hash = models.CharField(max_length=64, blank=True, default='')
+    refresh_expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, default='')
+
+    class Meta:
+        ordering = ['-last_used_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'device_id'], name='uniq_user_device_session',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} — {self.device_name or self.device_id}'
 
 
 class TimeStampedModel(models.Model):

@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.db.models import Case, F, Q, Sum, Value, When
 from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import BasePermission
@@ -126,6 +127,28 @@ class PaymentViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Idempotency key: prefer the Idempotency-Key header, fall back to the
+        # body field.  A replay returns the original payment (HTTP 200).
+        #
+        # Contract: key-scoped first-wins.  The key identifies the *operation*,
+        # not its outcome, so a replay returns the original record whatever its
+        # later state (including CANCELLED) — deduplication is the only promise.
+        # A client that needs to retry with a changed payload must use a new key.
+        idempotency_key = (
+            request.META.get('HTTP_IDEMPOTENCY_KEY')
+            or data.get('idempotency_key')
+            or None
+        )
+        # The header path bypasses the serializer's max_length guard; a key
+        # longer than the model column (64) would otherwise 500 on full_clean.
+        if idempotency_key is not None and len(idempotency_key) > 64:
+            raise ValidationError({
+                'idempotency_key': 'Ensure this field has no more than 64 characters.',
+            })
+        replayed = bool(idempotency_key) and Payment.objects.filter(
+            landlord=request.user, idempotency_key=idempotency_key,
+        ).exists()
+
         payment = record_payment(
             landlord=request.user,
             tenant=data['tenant'],
@@ -139,11 +162,12 @@ class PaymentViewSet(viewsets.ModelViewSet):
             notes=data.get('notes', ''),
             status=data.get('status', 'PAID'),
             recorded_by=request.user,
+            idempotency_key=idempotency_key,
         )
 
         return Response(
             PaymentSerializer(payment).data,
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_200_OK if replayed else status.HTTP_201_CREATED,
         )
 
     def partial_update(self, request, *args, **kwargs):

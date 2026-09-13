@@ -21,7 +21,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -247,12 +247,29 @@ def record_payment(*, landlord, tenant, lease, rent_period=None,
                    amount, currency='NGN', payment_date,
                    payment_method=PaymentMethod.BANK_TRANSFER,
                    reference='', notes='', status=PaymentStatus.PAID,
-                   recorded_by=None):
+                   recorded_by=None, idempotency_key=None):
     """Create a payment record and recalculate the affected rent period.
 
     Row-level locking (``select_for_update``) on the rent period prevents
     concurrent payments from producing an inconsistent aggregate.
+
+    Idempotency: when an ``idempotency_key`` is supplied it is scoped to
+    ``(landlord, idempotency_key)``.  Re-submitting the same key returns the
+    original payment instead of creating a second one.  The look-aside read
+    is done under a row lock so racing replays serialize; an ``IntegrityError``
+    fallback (via a nested savepoint) covers the residual race window.
     """
+    key = (idempotency_key or '').strip() or None
+
+    if key:
+        existing = (
+            Payment.objects.select_for_update()
+            .filter(landlord=landlord, idempotency_key=key)
+            .first()
+        )
+        if existing is not None:
+            return existing
+
     _validate_payment_lease_match(lease, tenant, rent_period)
 
     if rent_period is not None:
@@ -271,11 +288,22 @@ def record_payment(*, landlord, tenant, lease, rent_period=None,
         payment_method=payment_method,
         reference=reference,
         notes=notes,
+        idempotency_key=key,
         status=status,
         recorded_by=recorded_by,
     )
     payment.full_clean()
-    payment.save()
+    try:
+        with transaction.atomic():
+            payment.save()
+    except IntegrityError:
+        existing = (
+            Payment.objects.filter(landlord=landlord, idempotency_key=key)
+            .first()
+        )
+        if existing is not None:
+            return existing
+        raise
     log_audit(actor=payment.landlord, action='PAYMENT_CREATED', object_type='Payment', object_id=payment.id, detail={'amount': str(payment.amount), 'currency': payment.currency, 'status': payment.status})
     return payment
 

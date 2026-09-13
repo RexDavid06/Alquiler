@@ -56,7 +56,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third-party
     'rest_framework',
-    'rest_framework.authtoken',
     'corsheaders',
     'drf_spectacular',
     # Local apps
@@ -171,6 +170,7 @@ REST_FRAMEWORK = {
         'login': '10/minute',
         'register': '5/hour',
         'password_reset': '5/hour',
+        'refresh': '30/minute',
     },
 }
 
@@ -220,6 +220,7 @@ CORS_ALLOW_HEADERS = [
     'authorization',
     'content-type',
     'dnt',
+    'idempotency-key',
     'origin',
     'user-agent',
     'x-csrftoken',
@@ -295,6 +296,14 @@ TRIAL_DURATION_DAYS = env.int('TRIAL_DURATION_DAYS', default=14)
 
 # Phase 10A — Token expiry (days). Auth tokens older than this are rejected.
 AUTH_TOKEN_EXPIRY_DAYS = env.int('AUTH_TOKEN_EXPIRY_DAYS', default=7)
+
+# Phase 11A — Refresh credential lifetime (days). Refresh tokens are stored
+# hashed, rotate on every use, and are never sent to protected endpoints.
+AUTH_REFRESH_TOKEN_TTL_DAYS = env.int('AUTH_REFRESH_TOKEN_TTL_DAYS', default=90)
+
+# Phase 11A — Maximum active device sessions per user. Beyond this, the
+# oldest sessions are revoked (defensive bound against token accumulation).
+AUTH_DEVICE_LIMIT = env.int('AUTH_DEVICE_LIMIT', default=20)
 
 # Phase 10A — Production security headers (only when DEBUG=False).
 if not DEBUG:

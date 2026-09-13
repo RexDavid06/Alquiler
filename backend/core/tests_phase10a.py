@@ -15,11 +15,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, RequestFactory, override_settings
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from core.models import Token
 from rest_framework.test import APIClient
 
 from core.authentication import ExpiringTokenAuthentication
-from core.models import AuditLog, Role
+from core.models import AuditLog, DeviceSession, Role
 
 User = get_user_model()
 
@@ -207,73 +207,81 @@ class TokenExpiryTests(TestCase):
 
 
 # =====================================================================
-# 4. Token rotation on login
+# 4. Token rotation & multi-device sessions (Phase 11A)
 # =====================================================================
 
 class TokenRotationTests(TestCase):
-    """Verify login invalidates old token and issues a fresh one."""
+    """Verify per-device login rotation and coexistence (Phase 11A)."""
 
     def setUp(self):
         self.client = APIClient()
         self.user = _make_user(email='rot@example.com', password='pass12345')
         self.url = BASE + 'login/'
+        self.payload = {
+            'email': 'rot@example.com', 'password': 'pass12345',
+            'device_id': 'dev-a',
+        }
 
     def test_login_creates_fresh_token(self):
-        resp = self.client.post(self.url, {
-            'email': 'rot@example.com', 'password': 'pass12345',
-        })
+        resp = self.client.post(self.url, self.payload)
         self.assertEqual(resp.status_code, 200)
         self.assertIn('token', resp.data)
+        self.assertIn('refresh_token', resp.data)
         self.assertTrue(Token.objects.filter(user=self.user).exists())
 
-    def test_login_invalidates_old_token(self):
-        old_token = Token.objects.create(user=self.user)
-        old_key = old_token.key
-        resp = self.client.post(self.url, {
-            'email': 'rot@example.com', 'password': 'pass12345',
-        })
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotEqual(resp.data['token'], old_key)
-        self.assertFalse(Token.objects.filter(key=old_key).exists())
+    def test_login_same_device_rotates_token(self):
+        first = self.client.post(self.url, self.payload).data['token']
+        second = self.client.post(self.url, self.payload).data['token']
+        self.assertNotEqual(first, second)
+        self.assertFalse(Token.objects.filter(key=first).exists())
+        self.assertTrue(Token.objects.filter(key=second).exists())
+        self.assertEqual(Token.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(DeviceSession.objects.filter(user=self.user, revoked_at__isnull=True).count(), 1)
+
+    def test_login_second_device_does_not_invalidate_first(self):
+        first = self.client.post(self.url, self.payload).data['token']
+        second = self.client.post(self.url, {
+            **self.payload, 'device_id': 'dev-b',
+        }).data['token']
+        # Both tokens coexist and both are independently revocable.
+        self.assertTrue(Token.objects.filter(key=first).exists())
+        self.assertTrue(Token.objects.filter(key=second).exists())
+        self.assertEqual(Token.objects.filter(user=self.user).count(), 2)
+        self.assertEqual(DeviceSession.objects.filter(user=self.user, revoked_at__isnull=True).count(), 2)
 
     def test_login_new_token_authenticates(self):
-        resp = self.client.post(self.url, {
-            'email': 'rot@example.com', 'password': 'pass12345',
-        })
+        resp = self.client.post(self.url, self.payload)
         new_key = resp.data['token']
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {new_key}')
         me_resp = self.client.get(BASE + 'me/')
         self.assertEqual(me_resp.status_code, 200)
 
-    def test_old_token_rejected_after_rotation(self):
-        old_token = Token.objects.create(user=self.user)
-        old_key = old_token.key
-        self.client.post(self.url, {
-            'email': 'rot@example.com', 'password': 'pass12345',
-        })
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {old_key}')
+    def test_old_token_rejected_after_same_device_rotation(self):
+        first = self.client.post(self.url, self.payload).data['token']
+        self.client.post(self.url, self.payload)  # same device rotation
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {first}')
         resp = self.client.get(BASE + 'me/')
         self.assertEqual(resp.status_code, 401)
 
-    def test_repeated_login_no_multiple_tokens(self):
-        """Each login should leave exactly one token for the user."""
+    def test_repeated_login_same_device_single_token(self):
         for _ in range(3):
-            self.client.post(self.url, {
-                'email': 'rot@example.com', 'password': 'pass12345',
-            })
+            self.client.post(self.url, self.payload)
         self.assertEqual(Token.objects.filter(user=self.user).count(), 1)
 
-    def test_logout_after_rotation(self):
-        """Logout should work after token rotation."""
-        self.client.post(self.url, {
-            'email': 'rot@example.com', 'password': 'pass12345',
-        })
-        # Get the current token.
-        token = Token.objects.get(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
-        resp = self.client.post(BASE + 'logout/')
-        self.assertEqual(resp.status_code, 200)
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+    def test_logout_revokes_only_device_a(self):
+        resp_a = self.client.post(self.url, self.payload).data
+        resp_b = self.client.post(self.url, {
+            **self.payload, 'device_id': 'dev-b',
+        }).data
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {resp_a['token']}")
+        logout = self.client.post(BASE + 'logout/')
+        self.assertEqual(logout.status_code, 200)
+        self.assertFalse(Token.objects.filter(key=resp_a['token']).exists())
+        self.assertTrue(Token.objects.filter(key=resp_b['token']).exists())
+        self.assertTrue(Token.objects.filter(key=resp_b['token']).exists())
+        self.assertTrue(DeviceSession.objects.filter(user=self.user, revoked_at__isnull=True, device_id='dev-b').exists())
+        self.assertFalse(DeviceSession.objects.filter(user=self.user, revoked_at__isnull=True, device_id='dev-a').exists())
 
 
 # =====================================================================

@@ -1,33 +1,49 @@
 """Authentication and account views."""
 
+from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .exceptions import DomainError
-from .models import AccountStatus, NotificationPreference, User
+from .models import AccountStatus, NotificationPreference, Token, User
 from .serializers import (
     ChangePasswordSerializer,
     LoginSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    RefreshSerializer,
     RegisterSerializer,
     UpdateProfileSerializer,
     UserSerializer,
 )
+from .sessions import (
+    create_device_session,
+    refresh_access_token,
+    revoke_all_sessions,
+    revoke_session_for_token,
+)
 
 
-def _issue_token(user):
-    """Delete any existing token and issue a fresh one (rotation)."""
-    Token.objects.filter(user=user).delete()
-    return Token.objects.create(user=user).key
+def _issue_tokens(user, request, device_id=None, device_name=None):
+    """Create the multi-device session for ``user`` and return its tokens."""
+    _session, access_key, refresh_token, device_id = create_device_session(
+        user=user, request=request,
+        device_id=device_id, device_name=device_name,
+    )
+    return {
+        'token': access_key,
+        'refresh_token': refresh_token,
+        'device_id': device_id,
+        'expires_in': getattr(settings, 'AUTH_TOKEN_EXPIRY_DAYS', 7) * 86400,
+    }
 
 
 def _set_throttle_scope(view_func, scope):
@@ -55,7 +71,7 @@ def register(request):
     from core.services import log_audit
     log_audit(actor=user, action='ACCOUNT_CREATED', object_type='User', object_id=user.id, detail={'role': user.role})
     return Response(
-        {'user': UserSerializer(user).data, 'token': _issue_token(user)},
+        {'user': UserSerializer(user).data, **_issue_tokens(user, request)},
         status=status.HTTP_201_CREATED,
     )
 _set_throttle_scope(register, 'register')
@@ -73,7 +89,14 @@ def login(request):
     serializer.is_valid(raise_exception=True)
     user = serializer.validated_data['user']
     return Response(
-        {'user': UserSerializer(user).data, 'token': _issue_token(user)},
+        {
+            'user': UserSerializer(user).data,
+            **_issue_tokens(
+                user, request,
+                device_id=request.data.get('device_id'),
+                device_name=request.data.get('device_name'),
+            ),
+        },
         status=status.HTTP_200_OK,
     )
 _set_throttle_scope(login, 'login')
@@ -87,12 +110,40 @@ _set_throttle_scope(login, 'login')
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
-    # Delete the token so it can no longer be used.
+    # Revoke only the current device's session, then delete its access token.
+    revoke_session_for_token(request.auth)
     try:
         request.auth.delete()
     except Exception:
         pass
     return Response({'detail': 'Logged out.'})
+
+
+@extend_schema(
+    request=RefreshSerializer,
+    responses={200: {'type': 'object', 'properties': {'token': {'type': 'string'}, 'refresh_token': {'type': 'string'}, 'expires_in': {'type': 'integer'}}}},
+    tags=['auth'],
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh(request):
+    """Exchange a device session's refresh credential for a fresh access token.
+
+    Rotates both the access token and the refresh credential on every use.
+    """
+    serializer = RefreshSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    access_key, new_refresh_token = refresh_access_token(
+        device_id=serializer.validated_data['device_id'],
+        refresh_token=serializer.validated_data['refresh_token'],
+        request=request,
+    )
+    return Response({
+        'token': access_key,
+        'refresh_token': new_refresh_token,
+        'expires_in': getattr(settings, 'AUTH_TOKEN_EXPIRY_DAYS', 7) * 86400,
+    })
+_set_throttle_scope(refresh, 'refresh')
 
 
 @extend_schema(
@@ -133,10 +184,15 @@ def change_password(request):
         data=request.data, context={'request': request},
     )
     serializer.is_valid(raise_exception=True)
-    request.user.set_password(serializer.validated_data['new_password'])
-    request.user.save(update_fields=['password', 'updated_at'])
-    # Invalidate other sessions by deleting existing tokens.
-    Token.objects.filter(user=request.user).delete()
+    # The password change and credential revocation must commit (or fail)
+    # together, otherwise a revocation failure would leave a changed password
+    # with still-usable old credentials.
+    with transaction.atomic():
+        request.user.set_password(serializer.validated_data['new_password'])
+        request.user.save(update_fields=['password', 'updated_at'])
+        # Security measure: revoke every device session and delete all tokens.
+        revoke_all_sessions(request.user)
+        Token.objects.filter(user=request.user).delete()
     return Response({'detail': 'Password changed.'})
 
 
@@ -163,7 +219,6 @@ def password_reset_request(request):
     # Email delivery is routed through core.services.send_email, the seam where
     # the notification service (Phase 6) will be attached. For MVP it sends
     # through Django's configured mail backend.
-    from django.conf import settings
     from core.services import send_email
     reset_url = f"{settings.SITE_URL}/auth/reset-password?uid={uid}&token={token}"
     send_email(
@@ -193,10 +248,13 @@ def password_reset_confirm(request):
         raise DomainError('Invalid reset link.')
     if not default_token_generator.check_token(user, data['token']):
         raise DomainError('Invalid or expired reset link.')
-    user.set_password(data['new_password'])
-    user.save(update_fields=['password', 'updated_at'])
-    # Invalidate existing sessions.
-    Token.objects.filter(user=user).delete()
+    # Atomic with credential revocation for the same reason as change_password.
+    with transaction.atomic():
+        user.set_password(data['new_password'])
+        user.save(update_fields=['password', 'updated_at'])
+        # Security measure: revoke every device session and delete all tokens.
+        revoke_all_sessions(user)
+        Token.objects.filter(user=user).delete()
     return Response({'detail': 'Password has been reset.'})
 
 

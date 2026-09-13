@@ -15,7 +15,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.authtoken.models import Token
+from core.models import Token
 from rest_framework.test import APIClient
 
 from core.models import NotificationPreference, User

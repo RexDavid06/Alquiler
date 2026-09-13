@@ -18,7 +18,7 @@ from rest_framework.response import Response
 
 from core.permissions import IsLandlord, IsTenant
 from core.serializers import UserSerializer
-from core.views import _issue_token
+from core.views import _issue_tokens
 from leases.models import Lease
 
 from .models import TenantInvitation
@@ -153,7 +153,7 @@ class AcceptInvitationView(GenericAPIView):
         return Response(
             {
                 'user': UserSerializer(user).data,
-                'token': _issue_token(user),
+                **_issue_tokens(user, request),
                 'invitation': {
                     'landlord': invitation.landlord.full_name,
                     'property': invitation.property.name,

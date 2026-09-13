@@ -12,7 +12,7 @@ from django.core import mail
 from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from rest_framework.authtoken.models import Token
+from core.models import Token
 from rest_framework.test import APIClient
 
 from core.models import AccountStatus, AuditLog, NotificationPreference, User
@@ -217,12 +217,15 @@ class LoginApiTestCase(TestCase):
         self.assertTrue(Token.objects.filter(user=self.user).exists())
 
     def test_login_rotates_token(self):
-        """Login should issue a fresh token and invalidate the old one."""
-        old_token, _ = Token.objects.get_or_create(user=self.user)
-        old_key = old_token.key
-        resp = self.client.post(self.url, {
+        """Login from the same device should rotate that device's token."""
+        payload = {
             'email': 'landlord@example.com', 'password': 'pass12345',
-        })
+            'device_id': 'dev-rotate',
+        }
+        first = self.client.post(self.url, payload)
+        self.assertEqual(first.status_code, 200)
+        old_key = first.data['token']
+        resp = self.client.post(self.url, payload)
         self.assertEqual(resp.status_code, 200)
         new_key = resp.data['token']
         # New token differs from old.
@@ -231,6 +234,15 @@ class LoginApiTestCase(TestCase):
         self.assertFalse(Token.objects.filter(key=old_key).exists())
         # New token is valid.
         self.assertTrue(Token.objects.filter(key=new_key).exists())
+
+    def test_login_returns_refresh_token_and_device_id(self):
+        resp = self.client.post(self.url, {
+            'email': 'landlord@example.com', 'password': 'pass12345',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('refresh_token', resp.data)
+        self.assertIn('device_id', resp.data)
+        self.assertIn('expires_in', resp.data)
 
     def test_login_case_insensitive_email(self):
         resp = self.client.post(self.url, {
@@ -259,6 +271,26 @@ class LoginApiTestCase(TestCase):
             'email': 'landlord@example.com', 'password': 'pass12345',
         })
         self.assertEqual(resp.status_code, 400)
+
+    def test_login_pending_account_blocked_no_session_created(self):
+        """PENDING (default status) users must not receive credentials."""
+        self.user.status = AccountStatus.PENDING
+        self.user.save()
+        resp = self.client.post(self.url, {
+            'email': 'landlord@example.com', 'password': 'pass12345',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(Token.objects.filter(user=self.user).exists())
+
+    def test_login_deactivated_account_blocked_no_session_created(self):
+        """DEACTIVATED users must not receive credentials."""
+        self.user.status = AccountStatus.DEACTIVATED
+        self.user.save()
+        resp = self.client.post(self.url, {
+            'email': 'landlord@example.com', 'password': 'pass12345',
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(Token.objects.filter(user=self.user).exists())
 
     def test_login_inactive_account(self):
         self.user.is_active = False
@@ -502,6 +534,18 @@ class ChangePasswordApiTestCase(TestCase):
             'email': 'landlord@example.com', 'password': 'OldP@ss123',
         })
         self.assertEqual(login_resp.status_code, 400)
+
+    @patch('core.views.revoke_all_sessions', side_effect=Exception('boom'))
+    def test_change_password_rolls_back_when_revocation_fails(self, _mock):
+        """A revocation failure must not leave a changed password behind."""
+        self.client.post(
+            self.url,
+            {'old_password': 'OldP@ss123', 'new_password': 'NewP@ss456'},
+            **auth_header(self.user),
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('OldP@ss123'))
+        self.assertFalse(self.user.check_password('NewP@ss456'))
 
     # -- failure ---------------------------------------------------------- #
 

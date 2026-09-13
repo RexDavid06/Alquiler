@@ -9,9 +9,9 @@ boundaries, and payment-update edge cases.
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
+from core.models import Token
 from rest_framework.test import APIClient
 
 from core.models import User
@@ -1098,3 +1098,252 @@ class PaymentAmountCeilingTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         errors = resp.data.get('errors', resp.data)
         self.assertIn('amount', errors)
+
+
+# ---------------------------------------------------------------------------
+# Phase 11A (A2): Payment Idempotency Tests
+# ---------------------------------------------------------------------------
+
+class PaymentIdempotencyTests(TestCase):
+    """POST /payments with the same idempotency key returns the original
+    payment (HTTP 200) instead of creating a duplicate record."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord('idem@example.com')
+        self.tenant = make_tenant('idem-tenant@example.com')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop)
+        self.lease = make_lease(
+            self.landlord, self.tenant, self.prop, self.unit,
+            start_date=TODAY, expiry_date=IN_THREE_MONTHS,
+        )
+        self.period = self.lease.rent_schedule.first()
+        self.url = '/api/v1/payments/'
+        self.payload = {
+            'tenant': self.tenant.id,
+            'lease': self.lease.id,
+            'rent_period': self.period.id,
+            'amount': '500000.00',
+            'currency': 'NGN',
+            'payment_date': str(TODAY),
+            'payment_method': 'BANK_TRANSFER',
+            'reference': 'TXN-IDEM-001',
+            'notes': 'Rent',
+            'status': 'PAID',
+        }
+
+    def test_duplicate_header_returns_original_payment(self):
+        first = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='op-12345', **auth(self.landlord),
+        )
+        self.assertEqual(first.status_code, 201)
+        replay = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='op-12345', **auth(self.landlord),
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.data['id'], first.data['id'])
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 1)
+        # The amount is not double-counted toward the rent period.
+        self.assertEqual(paid_amount(self.period), Decimal('500000'))
+
+    def test_body_key_duplicate_returns_original_payment(self):
+        payload = dict(self.payload, idempotency_key='op-body-1')
+        first = self.client.post(self.url, payload, **auth(self.landlord))
+        self.assertEqual(first.status_code, 201)
+        replay = self.client.post(self.url, payload, **auth(self.landlord))
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.data['id'], first.data['id'])
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 1)
+
+    def test_header_key_precedes_body_key(self):
+        first = self.client.post(
+            self.url, dict(self.payload, idempotency_key='body-key'),
+            HTTP_IDEMPOTENCY_KEY='header-key', **auth(self.landlord),
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.data['idempotency_key'], 'header-key')
+        # Replaying the header key hits the same record even with a new body key.
+        replay = self.client.post(
+            self.url, dict(self.payload, idempotency_key='body-key-2'),
+            HTTP_IDEMPOTENCY_KEY='header-key', **auth(self.landlord),
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.data['id'], first.data['id'])
+
+    def test_distinct_keys_create_separate_payments(self):
+        for key in ('op-a', 'op-b'):
+            resp = self.client.post(
+                self.url, self.payload,
+                HTTP_IDEMPOTENCY_KEY=key, **auth(self.landlord),
+            )
+            self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 2)
+
+    def test_no_key_still_allows_multiple_payments(self):
+        self.client.post(self.url, self.payload, **auth(self.landlord))
+        self.client.post(self.url, self.payload, **auth(self.landlord))
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 2)
+
+    def test_same_key_different_landlord_is_isolated(self):
+        other_landlord = make_landlord('idem-other@example.com')
+        other_prop = make_property(other_landlord, name='Ocean View')
+        other_unit = make_unit(other_prop, name='Flat B')
+        other_lease = make_lease(
+            other_landlord, self.tenant, other_prop, other_unit,
+            start_date=TODAY, expiry_date=IN_THREE_MONTHS,
+        )
+        other_payload = dict(self.payload, lease=other_lease.id,
+                             rent_period=other_lease.rent_schedule.first().id)
+
+        first = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='shared-key', **auth(self.landlord),
+        )
+        other = self.client.post(
+            self.url, other_payload,
+            HTTP_IDEMPOTENCY_KEY='shared-key', **auth(other_landlord),
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(other.status_code, 201)
+        self.assertEqual(
+            Payment.objects.filter(idempotency_key='shared-key').count(), 2,
+        )
+
+    def test_blank_key_is_stored_as_null(self):
+        resp = self.client.post(
+            self.url, dict(self.payload, idempotency_key='   '),
+            **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertIsNone(resp.data['idempotency_key'])
+
+    def test_oversized_header_key_rejected_with_400(self):
+        """A header key longer than the 64-char column must be a 400, not a 500."""
+        resp = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='k' * 65, **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 0)
+
+    def test_cors_preflight_allows_idempotency_key_header(self):
+        """The browser client must be able to send the Idempotency-Key header."""
+        resp = self.client.options(
+            self.url,
+            HTTP_ORIGIN='http://localhost:5173',
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD='POST',
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS='idempotency-key',
+        )
+        self.assertEqual(resp.status_code, 200)
+        allow_headers = (resp.get('Access-Control-Allow-Headers') or '').lower()
+        self.assertIn('idempotency-key', allow_headers)
+
+    def test_invalid_request_with_key_returns_400_no_payment(self):
+        """An invalid payload is rejected — the key is not consumed or stored."""
+        bad = dict(self.payload, tenant=99999)
+        resp = self.client.post(
+            self.url, bad,
+            HTTP_IDEMPOTENCY_KEY='op-invalid-1', **auth(self.landlord),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 0)
+        # The key remains reusable for a subsequent valid request.
+        ok = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='op-invalid-1', **auth(self.landlord),
+        )
+        self.assertEqual(ok.status_code, 201)
+
+    def test_replay_after_cancel_returns_original(self):
+        """Replaying a key whose payment was later CANCELLED returns that
+        original record (200) — deduplication, not outcome-matching."""
+        first = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='op-cancel-1', **auth(self.landlord),
+        )
+        self.assertEqual(first.status_code, 201)
+        cancel = self.client.post(
+            f"{self.url}{first.data['id']}/cancel/", **auth(self.landlord),
+        )
+        self.assertEqual(cancel.status_code, 200)
+        self.assertEqual(cancel.data['status'], 'CANCELLED')
+
+        replay = self.client.post(
+            self.url, self.payload,
+            HTTP_IDEMPOTENCY_KEY='op-cancel-1', **auth(self.landlord),
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.data['id'], first.data['id'])
+        self.assertEqual(replay.data['status'], 'CANCELLED')
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 1)
+
+
+class RecordPaymentIdempotencyTests(TestCase):
+    """record_payment() service-level idempotency guarantees."""
+
+    def setUp(self):
+        self.landlord = make_landlord('idem-svc@example.com')
+        self.tenant = make_tenant('idem-svc-tenant@example.com')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop)
+        self.lease = make_lease(
+            self.landlord, self.tenant, self.prop, self.unit,
+            start_date=TODAY, expiry_date=IN_THREE_MONTHS,
+        )
+        self.period = self.lease.rent_schedule.first()
+
+    def test_replay_returns_same_instance(self):
+        from payments.services import record_payment
+
+        kwargs = dict(
+            landlord=self.landlord, tenant=self.tenant, lease=self.lease,
+            rent_period=self.period, amount=Decimal('250000'),
+            currency='NGN', payment_date=TODAY, payment_method='BANK_TRANSFER',
+            recorded_by=self.landlord,
+        )
+        first = record_payment(idempotency_key='svc-key-1', **kwargs)
+        replay = record_payment(idempotency_key='svc-key-1', **kwargs)
+        self.assertEqual(first.id, replay.id)
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 1)
+        self.assertEqual(paid_amount(self.period), Decimal('250000'))
+
+    def test_replay_with_different_body_returns_original(self):
+        """First-wins: a replayed key ignores new payload financial values."""
+        from payments.services import record_payment
+
+        base = dict(
+            landlord=self.landlord, tenant=self.tenant, lease=self.lease,
+            rent_period=self.period, amount=Decimal('250000'),
+            currency='NGN', payment_date=TODAY, payment_method='BANK_TRANSFER',
+            recorded_by=self.landlord, idempotency_key='svc-key-2',
+        )
+        first = record_payment(**base)
+        replay = record_payment(**dict(base, amount=Decimal('999999'), notes='changed'))
+        self.assertEqual(replay.id, first.id)
+        self.assertEqual(replay.amount, Decimal('250000'))
+        self.assertEqual(Payment.objects.filter(landlord=self.landlord).count(), 1)
+
+
+class ConcurrentPaymentIdempotencyTests(TransactionTestCase):
+    """Concurrency note (documented limitation, deliberate).
+
+    The design intends truly concurrent duplicate submissions with the same
+    actor + Idempotency-Key to serialize (row lock on the rent period) and
+    yield exactly one payment row.  The SQLite test environment cannot prove
+    this with a multi-threaded integration test: SQLite serializes writes
+    with its single-writer lock and surfaces the race as
+    ``sqlite3.OperationalError: database table is locked`` instead of a clean
+    unique-constraint violation, so a threaded test is inherently flaky here.
+
+    The invariant is instead covered by:
+    - serialized replay tests (``PaymentIdempotencyTests`` / 
+      ``RecordPaymentIdempotencyTests``), and
+    - the DB-level ``UniqueConstraint(landlord, idempotency_key)``, which is
+      the authoritative guarantee that a second row can never be committed,
+      on PostgreSQL (production) as well as SQLite.
+    This test class is intentionally EMPTY so the limitation is documented
+    in one place without silently shipping a flaky test.
+    """

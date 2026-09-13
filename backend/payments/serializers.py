@@ -64,12 +64,12 @@ class PaymentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'landlord', 'tenant', 'lease', 'rent_period',
             'amount', 'currency', 'payment_date', 'payment_method',
-            'reference', 'notes', 'status',
+            'reference', 'notes', 'status', 'idempotency_key',
             'gateway', 'gateway_reference', 'verified',
             'recorded_by', 'created_at', 'updated_at',
         ]
         read_only_fields = [
-            'id', 'landlord', 'tenant', 'lease',
+            'id', 'landlord', 'tenant', 'lease', 'idempotency_key',
             'gateway', 'gateway_reference', 'verified',
             'recorded_by', 'created_at', 'updated_at',
         ]
@@ -100,6 +100,10 @@ class PaymentCreateSerializer(serializers.Serializer):
     )
     reference = serializers.CharField(max_length=200, required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+    idempotency_key = serializers.CharField(
+        max_length=64, required=False, allow_blank=True,
+        trim_whitespace=True,
+    )
     status = serializers.ChoiceField(
         choices=PaymentStatus.choices, default=PaymentStatus.PAID,
     )

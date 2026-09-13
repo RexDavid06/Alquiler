@@ -77,6 +77,10 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 'This account is suspended.', code='account_suspended',
             )
+        if user.status != AccountStatus.ACTIVE:
+            raise serializers.ValidationError(
+                'This account is not active.', code='account_not_active',
+            )
         if not user.is_active:
             raise serializers.ValidationError(
                 'This account is inactive.', code='account_inactive',
@@ -113,6 +117,13 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def validate_new_password(self, value):
         password_validation.validate_password(value)
         return value
+
+
+class RefreshSerializer(serializers.Serializer):
+    """Exchange a device session's refresh credential for fresh tokens."""
+
+    device_id = serializers.CharField(max_length=64)
+    refresh_token = serializers.CharField(max_length=128)
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
