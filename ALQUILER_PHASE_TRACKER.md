@@ -657,41 +657,42 @@ Build platform admin dashboard for user management, system monitoring, and platf
 
 ## Phase 11 — Landlord Mobile Application
 
-> **Status:** PLANNED
+> **Status:** IN PROGRESS — foundation (11A) and all domain screens (11B–11F) built; typecheck and `expo export` green; final QA (11G–11H) in progress.
+> **Technology:** React Native + Expo (SDK 57, TypeScript, expo-router, axios, SecureStore). Decided at phase start per tracker.
 
 ### Objective
 Build mobile client for landlords to manage properties, tenants, leases, and payments on the go.
 
-### Scope (Planned)
-- Property and unit management
-- Tenant invitation and management
-- Lease creation and renewal
-- Payment recording and tracking
-- Notification viewing and preferences
-- Dashboard with revenue/occupancy KPIs
-- Offline support (if applicable)
+### Scope (In Progress)
+- Property and unit management — built (`/properties`, unit list on property detail; unit creation deferred to web)
+- Tenant invitation and management — built (`/tenants`, invite, tenant detail)
+- Lease creation and renewal — lease list/detail/create built; **renewal deferred on mobile** (web supports it)
+- Payment recording and tracking — built (list, record with Idempotency-Key, cancel)
+- Notification viewing and preferences — built (list, mark read/all-read, notification prefs)
+- Dashboard with revenue/occupancy KPIs — built (landlord dashboard endpoint)
+- Offline support — **deferred** (out of MVP scope per readiness report)
+- Push notifications — **deferred** (in-app + email notifications used)
 
-### Deliverables (Planned)
-- Landlord Mobile App (technology TBD)
-- Offline data caching (if applicable)
-- Push notification support (if applicable)
+### Deliverables (In Progress)
+- Landlord Mobile App — `mobile/` workspace, React Native + Expo (SDK 57)
+- Offline data caching — deferred (not in MVP scope)
+- Push notification support — deferred
 
-### Verification Requirements (Planned)
-- All landlord endpoints accessible
-- Data isolation enforced
-- Offline support working (if applicable)
-- Push notifications working (if applicable)
+### Verification (In Progress)
+- `tsc --noEmit` — clean (0 errors)
+- `npx expo export --platform web` — succeeds (all routes bundle)
+- Domain screens wired to verified backend endpoints (A1/A2 committed as `4c87dff`)
 
 ### Completion Criteria (Planned)
-- [ ] Mobile app builds successfully
-- [ ] All landlord endpoints functional
-- [ ] Data isolation verified
-- [ ] Offline support working (if applicable)
-- [ ] Push notifications working (if applicable)
+- [x] Mobile app builds successfully
+- [ ] All landlord endpoints functional (MVP screens done; renew-lease screen + end-to-end device QA pending)
+- [ ] Data isolation verified (inherited from backend A1/A2 tests; on-device QA pending)
+- [ ] Offline support working — deferred
+- [ ] Push notifications working — deferred
 
 ### Notes
-- Backend endpoints already implemented
-- Technology choice deferred (React Native, Flutter, or native)
+- Backend endpoints already implemented; A1/A2 auth (token + refresh + device sessions) consumed by `mobile/src/api/client.ts`
+- `EXPO_PUBLIC_API_BASE_URL` defaults to `http://localhost:8000/api/v1` (see `mobile/.env.example`)
 
 ---
 
