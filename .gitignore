@@ -13,6 +13,12 @@ env/
 *.sqlite3
 db.sqlite3
 
+# Postgres backups — never commit database dumps
+alquiler_*.sql
+backup.sql
+backend/backups/
+backend/scripts/*.sql
+
 # Static / media
 staticfiles/
 media/

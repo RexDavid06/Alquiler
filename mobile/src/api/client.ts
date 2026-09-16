@@ -1,12 +1,13 @@
-import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import axios, { AxiosError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
+
+import { storage } from '@/utils/storage';
 
 // =============================================================================
 // Alquiler Landlord — API client
 //
 // Multi-device aware: stores a stable device_id + refresh credential in
-// SecureStore, injects the access token on every request, and transparently
+// secure storage, injects the access token on every request, and transparently
 // rotates on 401 via POST /auth/refresh/.
 // =============================================================================
 
@@ -24,12 +25,12 @@ const STORAGE_KEYS = {
 export { STORAGE_KEYS };
 
 export async function getStoredDevice() {
-  let deviceId = await SecureStore.getItemAsync(STORAGE_KEYS.deviceId);
+  let deviceId = await storage.getItemAsync(STORAGE_KEYS.deviceId);
   if (!deviceId) {
     deviceId = Crypto.randomUUID();
-    await SecureStore.setItemAsync(STORAGE_KEYS.deviceId, deviceId);
+    await storage.setItemAsync(STORAGE_KEYS.deviceId, deviceId);
   }
-  let deviceName = (await SecureStore.getItemAsync(STORAGE_KEYS.deviceName)) ?? 'Alquiler mobile';
+  let deviceName = (await storage.getItemAsync(STORAGE_KEYS.deviceName)) ?? 'Alquiler mobile';
   return { deviceId, deviceName };
 }
 
@@ -39,35 +40,35 @@ export async function persistSession(data: {
   device_id: string;
   expires_in?: number;
 }) {
-  await SecureStore.setItemAsync(STORAGE_KEYS.accessToken, data.token);
-  await SecureStore.setItemAsync(STORAGE_KEYS.refreshToken, data.refresh_token);
-  await SecureStore.setItemAsync(STORAGE_KEYS.deviceId, data.device_id);
+  await storage.setItemAsync(STORAGE_KEYS.accessToken, data.token);
+  await storage.setItemAsync(STORAGE_KEYS.refreshToken, data.refresh_token);
+  await storage.setItemAsync(STORAGE_KEYS.deviceId, data.device_id);
 }
 
 export async function clearSession() {
-  await SecureStore.deleteItemAsync(STORAGE_KEYS.accessToken);
-  await SecureStore.deleteItemAsync(STORAGE_KEYS.refreshToken);
-  await SecureStore.deleteItemAsync(STORAGE_KEYS.user);
+  await storage.deleteItemAsync(STORAGE_KEYS.accessToken);
+  await storage.deleteItemAsync(STORAGE_KEYS.refreshToken);
+  await storage.deleteItemAsync(STORAGE_KEYS.user);
   // Device id stays — same device keeps its session identity.
 }
 
 export async function getAccessToken() {
-  return SecureStore.getItemAsync(STORAGE_KEYS.accessToken);
+  return storage.getItemAsync(STORAGE_KEYS.accessToken);
 }
 
 export async function getRefreshCredential() {
   return {
-    refreshToken: await SecureStore.getItemAsync(STORAGE_KEYS.refreshToken),
-    deviceId: await SecureStore.getItemAsync(STORAGE_KEYS.deviceId),
+    refreshToken: await storage.getItemAsync(STORAGE_KEYS.refreshToken),
+    deviceId: await storage.getItemAsync(STORAGE_KEYS.deviceId),
   };
 }
 
 export async function saveUser(user: unknown) {
-  await SecureStore.setItemAsync(STORAGE_KEYS.user, JSON.stringify(user));
+  await storage.setItemAsync(STORAGE_KEYS.user, JSON.stringify(user));
 }
 
 export async function loadUser(): Promise<unknown | null> {
-  const raw = await SecureStore.getItemAsync(STORAGE_KEYS.user);
+  const raw = await storage.getItemAsync(STORAGE_KEYS.user);
   return raw ? JSON.parse(raw) : null;
 }
 

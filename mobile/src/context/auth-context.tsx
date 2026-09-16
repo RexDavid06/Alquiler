@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import * as SecureStore from 'expo-secure-store';
 
 import * as authApi from '@/api/auth';
 import {
@@ -10,6 +9,7 @@ import {
   setSessionExpiredHandler,
 } from '@/api/client';
 import type { User } from '@/api/types';
+import { storage } from '@/utils/storage';
 
 interface AuthContextValue {
   user: User | null;
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       const stored = (await loadUser()) as User | null;
-      const token = await SecureStore.getItemAsync(STORAGE_KEYS.accessToken);
+      const token = await storage.getItemAsync(STORAGE_KEYS.accessToken);
       if (stored && token) {
         setUser(stored);
       } else {
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const fresh = await authApi.getMe();
       setUser(fresh);
-      await SecureStore.setItemAsync(STORAGE_KEYS.user, JSON.stringify(fresh));
+      await storage.setItemAsync(STORAGE_KEYS.user, JSON.stringify(fresh));
     } catch {
       // Token expired and refresh failed — handler above already fired.
     }

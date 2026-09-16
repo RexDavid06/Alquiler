@@ -31,7 +31,14 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# leftover Expo starter template (unused, kept out of git)
+rex-david/
+
+# stray secret scratch files must never be committed
+expo.txt
 
 # typescript
 *.tsbuildinfo

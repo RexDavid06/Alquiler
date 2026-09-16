@@ -175,12 +175,17 @@ npm run lint
 
 ## Deployment
 
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full free-tier deployment guide
+(environment reference, single-container run, PostgreSQL backup/restore, and
+moving between hosts).
+
 ### Environment Variables
 
-Key environment variables to configure:
+Key environment variables to configure (full reference in DEPLOYMENT.md):
 
 ```env
 # Database
+DB_ENGINE=postgres
 DB_NAME=alquiler
 DB_USER=postgres
 DB_PASSWORD=your_password
@@ -188,11 +193,11 @@ DB_HOST=localhost
 DB_PORT=5432
 
 # Django
-SECRET_KEY=your-secret-key
+DJANGO_SECRET_KEY=your-secret-key
 DEBUG=False
 ALLOWED_HOSTS=your-domain.com
 
-# Redis
+# Redis (optional for the demo — leave empty to disable)
 REDIS_URL=redis://localhost:6379/0
 
 # CORS
@@ -201,16 +206,21 @@ CORS_ALLOWED_ORIGINS=https://your-domain.com
 
 ### Production
 
+Refer to **[DEPLOYMENT.md](DEPLOYMENT.md).** The recommended free-tier run is a
+single container:
+
 ```bash
-# Build Docker images
-docker-compose -f docker-compose.prod.yml build
-
-# Start services
-docker-compose -f docker-compose.prod.yml up -d
-
-# Collect static files
-docker-compose -f docker-compose.prod.yml exec web python manage.py collectstatic
+cd backend
+cp .env.example .env            # set DEBUG=False + real values (see DEPLOYMENT.md)
+docker build -t alquiler -f Dockerfile .
+docker run -d -p 8000:8000 --env-file .env -v alquiler_static:/app/staticfiles -v alquiler_media:/app/media alquiler
+docker exec <container> python manage.py migrate
+docker exec <container> python manage.py createsuperuser
 ```
+
+For the full local/preview stack (web + PostgreSQL + Redis), run `docker
+compose up -d` from the repository root (`docker-compose.yml` automatically
+overrides the web service to use the bundled `db`/`redis` containers).
 
 ## License
 

@@ -27,7 +27,9 @@ export async function register(data: LoginInput & {
   phone: string;
 }): Promise<LoginResponse> {
   const device = await getStoredDevice();
-  const res = await api.post<LoginResponse>('/auth/register/', {
+  // Landlord-only endpoint: the backend assigns role=LANDLORD server-side,
+  // so the client never sends a role.
+  const res = await api.post<LoginResponse>('/auth/register/landlord/', {
     ...data,
     device_id: device.deviceId,
     device_name: device.deviceName,
