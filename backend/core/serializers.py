@@ -4,7 +4,7 @@ from django.contrib.auth import authenticate, password_validation
 from django.utils.translation import gettext as _
 from rest_framework import serializers
 
-from .models import AccountStatus, User
+from .models import AccountStatus, Role, User
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -54,6 +54,46 @@ class RegisterSerializer(serializers.Serializer):
         role = validated_data.pop('role')
         password = validated_data.pop('password')
         user = User(**validated_data, role=role)
+        user.set_password(password)
+        user.save()
+        return user
+
+
+class LandlordRegisterSerializer(serializers.Serializer):
+    """Public landlord self-registration.
+
+    This is the endpoint the landlord mobile app calls. The client only
+    supplies the fields a landlord needs: the ``role`` is decided entirely
+    server-side (always ``LANDLORD``) and any ``role`` submitted by a client
+    is rejected, so a public client can never escalate to an admin/tenant.
+    """
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if 'role' in self.initial_data:
+            raise serializers.ValidationError(
+                {'role': 'The role is assigned by the server and cannot be set.'},
+                code='role_not_allowed',
+            )
+        return attrs
+
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('A user with this email already exists.')
+        return value.lower()
+
+    def validate_password(self, value):
+        password_validation.validate_password(value)
+        return value
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(**validated_data, role=Role.LANDLORD)
         user.set_password(password)
         user.save()
         return user

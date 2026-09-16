@@ -12,6 +12,7 @@ from drf_spectacular.views import (
 )
 from rest_framework.routers import DefaultRouter
 
+from core.views import health_check
 from properties.views import PropertyViewSet, UnitViewSet
 
 API_PREFIX = 'api/v1/'
@@ -21,6 +22,9 @@ router.register('properties', PropertyViewSet, basename='property')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Root-level health check for free-tier uptime monitors. Also available
+    # at /api/v1/auth/health/.
+    path('health/', health_check, name='root-health'),
     path(API_PREFIX + 'auth/', include('core.urls')),
     path(API_PREFIX + 'tenants/', include('tenants.urls')),
     path(API_PREFIX + 'leases/', include('leases.urls')),

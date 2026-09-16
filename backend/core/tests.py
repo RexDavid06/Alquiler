@@ -174,6 +174,155 @@ class RegisterApiTestCase(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 1b. Landlord registration (mobile app)
+# ---------------------------------------------------------------------------
+
+class LandlordRegisterApiTestCase(TestCase):
+    """POST /api/v1/auth/register/landlord/
+
+    The landlord mobile app does NOT send a role: the backend assigns
+    ``LANDLORD`` server-side and rejects any client-supplied role.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = BASE + 'register/landlord/'
+        self.valid_payload = {
+            'email': 'landlord@example.com',
+            'password': 'Str0ngP@ss!',
+            'first_name': 'Jane',
+            'last_name': 'Doe',
+        }
+
+    # -- success ---------------------------------------------------------- #
+
+    def test_register_creates_landlord_without_role_field(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['user']['role'], 'LANDLORD')
+        self.assertEqual(resp.data['user']['email'], 'landlord@example.com')
+        self.assertIn('token', resp.data)
+        user = User.objects.get(email='landlord@example.com')
+        self.assertEqual(user.role, 'LANDLORD')
+        self.assertEqual(user.status, AccountStatus.ACTIVE)
+        self.assertTrue(user.is_active)
+
+    def test_register_assigns_landlord_role_server_side(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        user = User.objects.get(email='landlord@example.com')
+        self.assertEqual(user.role, 'LANDLORD')
+        self.assertFalse(user.is_tenant)
+        self.assertFalse(user.is_platform_admin)
+
+    def test_register_without_role_defaults_to_landlord(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['user']['role'], 'LANDLORD')
+
+    def test_register_case_insensitive_email(self):
+        payload = {**self.valid_payload, 'email': 'LANDLORD@EXAMPLE.COM'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(User.objects.filter(email='landlord@example.com').exists())
+
+    def test_register_issues_token_and_session(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        user = User.objects.get(email='landlord@example.com')
+        self.assertTrue(Token.objects.filter(user=user).exists())
+        self.assertIn('refresh_token', resp.data)
+        self.assertIn('device_id', resp.data)
+
+    def test_register_creates_notification_preference(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        user = User.objects.get(email='landlord@example.com')
+        self.assertTrue(NotificationPreference.objects.filter(user=user).exists())
+
+    def test_register_creates_audit_log_with_landlord_role(self):
+        resp = self.client.post(self.url, self.valid_payload)
+        self.assertEqual(resp.status_code, 201)
+        user = User.objects.get(email='landlord@example.com')
+        log = AuditLog.objects.filter(
+            actor=user, action='ACCOUNT_CREATED', object_type='User',
+            object_id=user.id,
+        )
+        self.assertEqual(log.count(), 1)
+        self.assertEqual(log.first().detail['role'], 'LANDLORD')
+
+    def test_register_optional_phone(self):
+        payload = {**self.valid_payload, 'phone': ''}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 201)
+
+    def test_register_allows_phone(self):
+        payload = {**self.valid_payload, 'phone': '+2348012345678'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 201)
+        user = User.objects.get(email='landlord@example.com')
+        self.assertEqual(user.phone, '+2348012345678')
+
+    # -- client cannot set a role ---------------------------------------- #
+
+    def test_register_rejects_admin_role(self):
+        payload = {**self.valid_payload, 'role': 'PLATFORM_ADMIN'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('role', resp.data['errors'])
+        self.assertFalse(User.objects.filter(email='landlord@example.com').exists())
+
+    def test_register_rejects_tenant_role(self):
+        payload = {**self.valid_payload, 'role': 'TENANT'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('role', resp.data['errors'])
+        self.assertFalse(User.objects.filter(email='landlord@example.com').exists())
+
+    # -- existing validation rules still apply ---------------------------- #
+
+    def test_register_rejects_duplicate_email(self):
+        make_user(email='dup@example.com')
+        payload = {**self.valid_payload, 'email': 'dup@example.com'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_duplicate_email_case_insensitive(self):
+        make_user(email='dup@example.com')
+        payload = {**self.valid_payload, 'email': 'DUP@EXAMPLE.COM'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_invalid_email(self):
+        payload = {**self.valid_payload, 'email': 'not-an-email'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_weak_password(self):
+        payload = {**self.valid_payload, 'password': '123'}
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_missing_email(self):
+        payload = dict(self.valid_payload)
+        del payload['email']
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_missing_first_name(self):
+        payload = dict(self.valid_payload)
+        del payload['first_name']
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_register_rejects_missing_last_name(self):
+        payload = dict(self.valid_payload)
+        del payload['last_name']
+        resp = self.client.post(self.url, payload)
+        self.assertEqual(resp.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
 # 2. Login
 # ---------------------------------------------------------------------------
 
@@ -801,3 +950,46 @@ class HealthCheckApiTestCase(TestCase):
             self.assertEqual(resp.status_code, 503)
             self.assertEqual(resp.data['status'], 'unhealthy')
             self.assertEqual(resp.data['database'], 'unavailable')
+
+
+class UserManagerTestCase(TestCase):
+    """Custom UserManager behavior (create_superuser/create_user)."""
+
+    def test_create_superuser_sets_full_superuser_privileges(self):
+        su = User.objects.create_superuser(
+            email='root@example.com', password='Passw0rd!',
+            first_name='Root', last_name='Admin',
+        )
+        su.refresh_from_db()
+        self.assertTrue(su.is_superuser)
+        self.assertTrue(su.is_staff)
+        self.assertEqual(su.role, 'PLATFORM_ADMIN')
+        self.assertEqual(su.status, AccountStatus.ACTIVE)
+        self.assertTrue(su.is_active)
+        self.assertTrue(su.check_password('Passw0rd!'))
+
+    def test_create_superuser_accepts_role_keyword(self):
+        """``createsuperuser`` passes ``role`` (REQUIRED_FIELDS); it must not crash."""
+        su = User.objects.create_superuser(
+            email='root2@example.com', password='Passw0rd!',
+            first_name='Root', last_name='Admin', role='PLATFORM_ADMIN',
+        )
+        su.refresh_from_db()
+        self.assertEqual(su.role, 'PLATFORM_ADMIN')
+
+    def test_create_superuser_rejects_non_admin_role(self):
+        """A superuser can never be a LANDLORD/TENANT (role conflict)."""
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(
+                email='dup@example.com', password='Passw0rd!',
+                role='LANDLORD',
+            )
+
+    def test_create_user_does_not_grant_superuser(self):
+        user = User.objects.create_user(
+            email='plain@example.com', password='pass12345',
+            role='LANDLORD', first_name='T', last_name='U',
+        )
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.is_staff)
+        self.assertEqual(user.role, 'LANDLORD')

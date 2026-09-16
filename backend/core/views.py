@@ -16,6 +16,7 @@ from .exceptions import DomainError
 from .models import AccountStatus, NotificationPreference, Token, User
 from .serializers import (
     ChangePasswordSerializer,
+    LandlordRegisterSerializer,
     LoginSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -51,6 +52,37 @@ def _set_throttle_scope(view_func, scope):
     view_func.cls.throttle_scope = scope
 
 
+def _apply_self_registration_pipeline(user):
+    """Shared post-save steps for public self-registration accounts."""
+    # Self-registration is landlord-only. Activate and assign a subscription.
+    user.activate()
+    # Landing a landlord without a subscription is never allowed.
+    from subscriptions.services import ensure_landlord_subscription
+    ensure_landlord_subscription(user)
+    NotificationPreference.objects.get_or_create(user=user)
+    from core.services import log_audit
+    log_audit(actor=user, action='ACCOUNT_CREATED', object_type='User', object_id=user.id, detail={'role': user.role})
+
+
+@extend_schema(
+    request=LandlordRegisterSerializer,
+    responses={201: {'type': 'object', 'properties': {'user': {'$ref': '#/components/schemas/User'}, 'token': {'type': 'string'}}}},
+    tags=['auth'],
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_landlord(request):
+    serializer = LandlordRegisterSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
+    _apply_self_registration_pipeline(user)
+    return Response(
+        {'user': UserSerializer(user).data, **_issue_tokens(user, request)},
+        status=status.HTTP_201_CREATED,
+    )
+_set_throttle_scope(register_landlord, 'register')
+
+
 @extend_schema(
     request=RegisterSerializer,
     responses={201: {'type': 'object', 'properties': {'user': {'$ref': '#/components/schemas/User'}, 'token': {'type': 'string'}}}},
@@ -62,14 +94,7 @@ def register(request):
     serializer = RegisterSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
-    # Self-registration is landlord-only. Activate and assign a subscription.
-    user.activate()
-    # Landing a landlord without a subscription is never allowed.
-    from subscriptions.services import ensure_landlord_subscription
-    ensure_landlord_subscription(user)
-    NotificationPreference.objects.get_or_create(user=user)
-    from core.services import log_audit
-    log_audit(actor=user, action='ACCOUNT_CREATED', object_type='User', object_id=user.id, detail={'role': user.role})
+    _apply_self_registration_pipeline(user)
     return Response(
         {'user': UserSerializer(user).data, **_issue_tokens(user, request)},
         status=status.HTTP_201_CREATED,

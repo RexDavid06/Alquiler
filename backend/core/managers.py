@@ -28,9 +28,15 @@ class UserManager(BaseUserManager):
 
     def create_superuser(self, email, password, first_name='Admin',
                          last_name='Admin', **extra_fields):
+        # ``role`` must be PLATFORM_ADMIN: it is forced positionally below,
+        # and django's ``createsuperuser`` passes it as a keyword (it is in
+        # REQUIRED_FIELDS), so it has to be popped here or it crashes as a
+        # duplicate argument.
+        role = extra_fields.pop('role', 'PLATFORM_ADMIN')
+        if role != 'PLATFORM_ADMIN':
+            raise ValueError('Superusers must have role PLATFORM_ADMIN.')
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        extra_fields.setdefault('role', 'PLATFORM_ADMIN')
         extra_fields.setdefault('status', 'ACTIVE')
         return self._create_user(
             email, password, 'PLATFORM_ADMIN', first_name, last_name,
