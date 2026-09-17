@@ -1,4 +1,6 @@
 import api from './client';
+import { withCache } from './with-cache';
+import { cacheKey } from '@/utils/cache';
 import type {
   Invitation,
   InvitationInput,
@@ -11,18 +13,24 @@ const TENANTS = '/tenants/';
 const INVITATIONS = '/tenants/invitations/';
 
 export async function listTenants(params?: { search?: string; status?: string; page?: number }) {
-  const res = await api.get<PaginatedResponse<TenantUser>>(TENANTS, { params });
-  return res.data;
+  return withCache(cacheKey('tenants', params?.search, params?.status, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<TenantUser>>(TENANTS, { params });
+    return res.data;
+  });
 }
 
 export async function getTenant(id: number): Promise<TenantDetail> {
-  const res = await api.get<TenantDetail>(`${TENANTS}${id}/`);
-  return res.data;
+  return withCache(cacheKey('tenant', id), async () => {
+    const res = await api.get<TenantDetail>(`${TENANTS}${id}/`);
+    return res.data;
+  });
 }
 
 export async function listInvitations(params?: { status?: string; page?: number }) {
-  const res = await api.get<PaginatedResponse<Invitation>>(INVITATIONS, { params });
-  return res.data;
+  return withCache(cacheKey('invitations', params?.status, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Invitation>>(INVITATIONS, { params });
+    return res.data;
+  });
 }
 
 export async function createInvitation(data: InvitationInput): Promise<Invitation> {

@@ -1,4 +1,6 @@
 import api from './client';
+import { withCache } from './with-cache';
+import { cacheKey } from '@/utils/cache';
 import type {
   PaginatedResponse,
   Payment,
@@ -14,13 +16,17 @@ export async function listPayments(params?: {
   search?: string;
   page?: number;
 }) {
-  const res = await api.get<PaginatedResponse<Payment>>('/payments/', { params });
-  return res.data;
+  return withCache(cacheKey('payments', params?.status, params?.lease, params?.tenant, params?.search, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Payment>>('/payments/', { params });
+    return res.data;
+  });
 }
 
 export async function getPayment(id: number): Promise<Payment> {
-  const res = await api.get<Payment>(`/payments/${id}/`);
-  return res.data;
+  return withCache(cacheKey('payment', id), async () => {
+    const res = await api.get<Payment>(`/payments/${id}/`);
+    return res.data;
+  });
 }
 
 export async function createPayment(

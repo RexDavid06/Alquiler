@@ -5,12 +5,14 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
+import { useNotificationObserver } from '@/utils/push-notifications';
 
 void SplashScreen.preventAutoHideAsync();
 
 function RootNavigator() {
   const { initializing } = useAuth();
   const colorScheme = useColorScheme();
+  useNotificationObserver();
 
   useEffect(() => {
     if (!initializing) {

@@ -32,6 +32,7 @@ class NotificationType(models.TextChoices):
 class NotificationChannel(models.TextChoices):
     EMAIL = 'EMAIL', 'Email'
     IN_APP = 'IN_APP', 'In-app'
+    PUSH = 'PUSH', 'Push'
 
 
 class NotificationStatus(models.TextChoices):
@@ -110,3 +111,47 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'{self.notification_type} → {self.recipient.email} [{self.status}]'
+
+
+class PushDevice(models.Model):
+    """A registered push-notification endpoint for a user (Phase 11 scaffold).
+
+    One row per (user, push token).  The token is the provider-issued device
+    token (e.g. an Expo push token on mobile).  Registration is idempotent:
+    re-registering the same token updates the device metadata and re-activates
+    it, so a token is never duplicated for a user.
+
+    Delivering messages is out of scope for the scaffold (requires the push
+    provider credentials); this model + API is the contract the mobile client
+    persists against.
+    """
+
+    class Platform(models.TextChoices):
+        ANDROID = 'ANDROID', 'Android'
+        IOS = 'IOS', 'iOS'
+        WEB = 'WEB', 'Web'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='push_devices',
+    )
+    token = models.CharField(max_length=512)
+    platform = models.CharField(
+        max_length=20, choices=Platform.choices, default=Platform.ANDROID,
+    )
+    device_name = models.CharField(max_length=120, default='')
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'token'], name='uniq_user_push_device',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} — {self.platform} [{self.token[:24]}…]'

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Alert, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 
 import { getLease, terminateLease } from '@/api/leases';
 import { ApiRequestError } from '@/api/client';
@@ -101,6 +101,12 @@ export default function LeaseDetailScreen() {
             onPress={onTerminate}
             loading={terminating}
           />
+        ) : null}
+
+        {lease.status === 'ACTIVE' || lease.status === 'EXPIRING' || lease.status === 'EXPIRED' ? (
+          <Link href={`/(app)/leases/renew-lease?id=${lease.id}`} asChild>
+            <Button title="Renew lease" variant="secondary" onPress={() => {}} />
+          </Link>
         ) : null}
 
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Rent schedule</Text>

@@ -1,7 +1,7 @@
 # CURRENT PROJECT STATUS
 
 > Time-boxed snapshot of the Alquiler project.
-> Created: 2026-09-10 | Source: phase tracker, architecture doc, project audit report, git state
+> Created: 2026-09-10 | Last updated: 2026-09-17 (Phase 11 COMPLETED) | Source: phase tracker, git state
 
 ---
 
@@ -9,14 +9,14 @@
 
 | Question | Answer |
 |----------|--------|
-| **Current phase** | Phase 10 — Super User Web Application, sub-phase 10G |
-| **Last completed phase** | Phase 10G — Final QA & Polish (marked COMPLETED in tracker) |
-| **Is it genuinely complete?** | Mostly — 568 backend + 55 frontend tests and clean builds are documented, **but the Phase 10D–10G work is NOT committed to git** and the project audit predates these phases. |
-| **Most recently implemented** | Phase 10D–10G: Plan management UI (PlansPage), Activity Feed & Audit Log (AuditLogViewSet + ActivityPage), CSV export integration in the admin dashboard, final QA & polish. |
-| **Most recently audited** | Project-wide audit report (`PROJECT_AUDIT_REPORT.md`, 2026-09-10) covering the codebase as of **Phase 10B** — it does NOT cover 10D–10G. |
-| **Currently being worked on** | Nothing active — this session is winding down. |
+| **Current phase** | Phase 11 — Landlord Mobile Application (marked COMPLETED in tracker) |
+| **Last completed phase** | Phase 11 — Landlord Mobile App (React Native + Expo SDK 57) |
+| **Is it genuinely complete?** | Mostly — Phase 0–10 committed; Phase 11 (mobile) committed and QA'd (`tsc --noEmit` clean, expo export green, backend 72/72 notifications incl. 11 new PushDevice tests). On-device E2E + push delivery remain for Phases 12–14. |
+| **Most recently implemented** | Phase 11 additions: renew-lease mobile screen, AsyncStorage offline read-cache, push-notification scaffold (client + backend `PushDevice` registry). Paystack gateway explicitly deferred. |
+| **Most recently audited** | `PROJECT_AUDIT_REPORT.md` (covers through Phase 10B); Phase 11 QA documented in `PHASE_11_READINESS_REPORT.md` + `PHASE_11A_A2_*` reports. |
+| **Currently being worked on** | Nothing active — Phase 11 work is complete and committed. |
 
-Phases 0–9 (backend) are complete and verified at **501 tests**; Phase 10A–10G (frontend + admin backend) brought the suite to **568 backend + 55 frontend tests**.
+Phases 0–10 (backend + admin web) verified at **578 backend + 71 frontend tests**; Phase 11 pushes the backend suite to **616+** (bug-hunt report shows 616/616; notifications app at 72/72 including 11 new PushDevice tests).
 
 ---
 
@@ -88,10 +88,11 @@ None that stop development. One **production-runtime** item (below) must be fixe
 10. **Security headers** (HSTS/CSRF/XSS) documented as "Planned" in architecture — not confirmed implemented.
 
 ### Documented as planned (not gaps)
-- Paystack payment gateway integration
+- **Paystack payment gateway integration** (explicitly deferred out of Phase 11 scope)
+- Actual push delivery (FCM/APNs credentials + EAS projectId) — client scaffold + server `PushDevice` registry done; provider setup pending
 - Background queue (Celery/RQ) — Redis provisioned but unused
 - CI/CD, monitoring, structured logging aggregation, integration/E2E/load tests
-- Landlord mobile app (Phase 11) and tenant client (Phase 12+)
+- On-device mobile E2E QA, tenant client (Phase 12+)
 
 ---
 
@@ -144,16 +145,18 @@ The next phase (Phase 11 — Landlord Mobile App) can proceed because all backen
 
 | Item | Status |
 |------|--------|
-| **Backend tests** | 568/568 passing (Phase 10G run: `Ran 568 tests in 795.618s — OK`) |
-| **Frontend tests** | 55/55 passing (5 files, Vitest) |
-| **Git status** | Branch `master`, up to date with `origin/master`; **uncommitted Phase 10D–10G changes** (16 modified + 2 untracked pages + untracked `PROJECT_AUDIT_REPORT.md` + `task.md`) |
+| **Backend tests** | 616/616 passing (Phase 11 bug-hunt run `PHASE_11A_A2_FINAL_BUG_HUNT_REPORT.md`); notifications app 72/72 incl. 11 new PushDevice tests |
+| **Frontend tests** | 55/55 passing (Phase 10G, Vitest) |
+| **Mobile QA** | `tsc --noEmit` clean, `expo lint` no new issues, `expo export --platform web` SUCCESS |
+| **Git status** | Branch `master`, up to date with `origin/master`; working tree clean |
 | **Current branch** | `master` |
 | **Docker / production foundation** | Ready — multi-stage Dockerfile, `docker-compose.yml` (web/db/redis), gunicorn config, health checks; **no actual deployment yet** |
 | **Database** | SQLite for dev; PostgreSQL 16-alpine in Docker for prod; migrations clean (no pending changes) |
-| **Authentication / authorization** | Complete — expiring tokens, role permissions, server-side enforcement |
+| **Authentication / authorization** | Complete — expiring tokens, role permissions, server-side enforcement; multi-device sessions (A1/A2) consumed by mobile |
 | **Multi-tenant / data isolation** | Complete — querysets scoped at ViewSet level; cross-landlord leakage covered by tests |
 | **Frontend** | Phase 10A–10G complete — 11 pages, admin console, plans UI, activity feed, CSV export; production build SUCCESS |
-| **API documentation** | drf-spectacular wired: `/api/schema/` and `/api/docs/`; **`/api/redoc/` is referenced in README but NOT wired** |
+| **Mobile** | Phase 11 complete — Expo SDK 57 app, all landlord screens, renew-lease, offline read-cache, push-notification scaffold |
+| **API documentation** | drf-spectacular wired: `/api/schema/` and `/api/docs/` |
 
 ---
 
@@ -162,23 +165,23 @@ The next phase (Phase 11 — Landlord Mobile App) can proceed because all backen
 > Read this first. It tells you exactly where the project stopped.
 
 ## 1. First thing to inspect
-- `git status` / `git log --oneline -10` — confirm the uncommitted Phase 10D–10G work is still in the working tree.
-- `git diff --stat` — verify the list of modified/untracked files matches the Phase 10D–10G scope before committing.
+- `git status` / `git log --oneline -10` — confirm the Phase 11 (mobile) work was committed. Working tree should be clean.
+- `git log --oneline` — Phase 11 commit messages: "Build Phase 11 landlord mobile app…", "hardening for prod", and the Phase 11 completion commit with renew-lease / offline cache / push scaffold.
 
 ## 2. First thing to fix
-- **Commit the Phase 10D–10G work** (Activity feed, Audit log, Plans UI, CSV export, Dashboard updates). Untracked `frontend/src/pages/ActivityPage.tsx` and `frontend/src/pages/PlansPage.tsx` should be staged.
-- **Add `python-dateutil` to `backend/requirements.txt`** (HIGH audit finding — runtime crash for payment schedule generation).
-- Optional, quick: fix README version/redoc inaccuracies and update `ALQUILER_ARCHITECTURE.md` for 10D–10G.
+- (No urgent fixes known.) Remaining known items are **deferred/external by design**: Paystack gateway, FCM/APNs push delivery (needs EAS projectId + credentials), production deployment, on-device mobile E2E QA.
 
 ## 3. Next development phase/task
-- **Phase 11 — Landlord Mobile Application** (status PLANNED). Backend endpoints are ready; technology choice (React Native / Flutter / native) is still TBD and must be decided at phase start.
-- Phase 12 (Client Integration & E2E Testing) and Phase 13 (Production Deployment) follow after.
+- **Phase 12 — Client Integration & E2E Testing** (status PLANNED). Combine with on-device mobile QA: renew-lease flow, offline read-cache behavior, push registration end-to-end.
+- **Paystack payment gateway** — deferred from Phase 11 scope; still open.
+- Phase 13 (Production Deployment) and Phase 14 (Launch Readiness) follow after.
 
 ## 4. Important documents to read before continuing
 1. `CURRENT_PROJECT_STATUS.md` — this file
-2. `ALQUILER_PHASE_TRACKER.md` — authoritative phase definitions, strict rules, changelog
-3. `ALQUILER_ARCHITECTURE.md` — architectural blueprint and decisions (note: stale for 10D–10G)
-4. `PROJECT_AUDIT_REPORT.md` — audit findings (covers through Phase 10B only)
-5. `task.md` — instructions for generating this snapshot
+2. `ALQUILER_PHASE_TRACKER.md` — authoritative phase definitions, strict rules, changelog (Phase 11 marked COMPLETED)
+3. `PHASE_11_READINESS_REPORT.md` + `PHASE_11A_A2_*` reports — backend verification for mobile foundations
+4. `mobile/AGENTS.md` — mandates reading Expo SDK 57 docs before writing mobile code
+5. `ALQUILER_ARCHITECTURE.md` — architectural blueprint and decisions
+6. `task.md` — instructions for generating this snapshot
 
-**Key numbers to re-verify after committing:** backend 568/568 tests, frontend 55/55 tests, `tsc --noEmit` clean, `vite build` SUCCESS, `makemigrations --check --dry-run` clean.
+**Key numbers to re-verify after committing:** backend 578+ (Phase 11 adds 11 PushDevice tests → 616 documented), frontend 71 tests, mobile `tsc --noEmit` clean + `expo export` SUCCESS, `makemigrations --check --dry-run` clean.

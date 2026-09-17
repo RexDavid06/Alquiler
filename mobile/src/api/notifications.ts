@@ -1,12 +1,16 @@
 import api from './client';
+import { withCache } from './with-cache';
+import { cacheKey } from '@/utils/cache';
 import type { Notification, NotificationPreference, PaginatedResponse } from './types';
 
 export async function listNotifications(params?: {
   is_read?: boolean;
   page?: number;
 }) {
-  const res = await api.get<PaginatedResponse<Notification>>('/notifications/', { params });
-  return res.data;
+  return withCache(cacheKey('notifications', params?.is_read, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Notification>>('/notifications/', { params });
+    return res.data;
+  });
 }
 
 export async function getUnreadCount(params?: { notification_type?: string }) {

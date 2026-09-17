@@ -1,4 +1,6 @@
 import api from './client';
+import { withCache } from './with-cache';
+import { cacheKey } from '@/utils/cache';
 import type {
   Lease,
   LeaseDetail,
@@ -14,13 +16,17 @@ export async function listLeases(params?: {
   search?: string;
   page?: number;
 }) {
-  const res = await api.get<PaginatedResponse<Lease>>(LEASES, { params });
-  return res.data;
+  return withCache(cacheKey('leases', params?.status, params?.search, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Lease>>(LEASES, { params });
+    return res.data;
+  });
 }
 
 export async function getLease(id: number): Promise<LeaseDetail> {
-  const res = await api.get<LeaseDetail>(`${LEASES}${id}/`);
-  return res.data;
+  return withCache(cacheKey('lease', id), async () => {
+    const res = await api.get<LeaseDetail>(`${LEASES}${id}/`);
+    return res.data;
+  });
 }
 
 export async function createLease(data: unknown): Promise<LeaseDetail> {
@@ -44,6 +50,8 @@ export async function getLeaseHistory(id: number): Promise<Lease[]> {
 }
 
 export async function listRentSchedules(params?: { lease?: number; page?: number }) {
-  const res = await api.get<PaginatedResponse<RentScheduleItem>>('/rent-schedules/', { params });
-  return res.data;
+  return withCache(cacheKey('rent-schedules', params?.lease, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<RentScheduleItem>>('/rent-schedules/', { params });
+    return res.data;
+  });
 }

@@ -25,6 +25,7 @@ from notifications.models import (
     NotificationChannel,
     NotificationStatus,
     NotificationType,
+    PushDevice,
 )
 from notifications.services import (
     build_idempotency_key,
@@ -939,3 +940,108 @@ class NotificationAPITest(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertTrue(resp.data['email_enabled'])
         self.assertTrue(resp.data['in_app_enabled'])
+
+
+# ===========================================================================
+# Push Device (Phase 11 scaffold) Tests
+# ===========================================================================
+
+class PushDeviceAPITest(TestCase):
+    """Push-device registration / unregistration endpoints."""
+
+    PUSH_URL = '/api/v1/notifications/register-push-device/'
+    UNREG_URL = '/api/v1/notifications/unregister-push-device/'
+    TOKEN = 'ExponentPushToken[test-1234567890]'
+
+    def setUp(self):
+        self.client = APIClient()
+        self.landlord = make_landlord()
+        self.tenant = make_tenant()
+        self.prop, self.unit = make_property(self.landlord)
+        self.lease = make_lease(self.landlord, self.tenant, self.prop, self.unit)
+        self.headers = auth(self.landlord)
+
+    def test_unauthenticated_cannot_register(self):
+        resp = self.client.post(self.PUSH_URL, {'token': self.TOKEN}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_register_device(self):
+        resp = self.client.post(
+            self.PUSH_URL,
+            {'token': self.TOKEN, 'platform': 'ANDROID', 'device_name': 'Pixel 9'},
+            format='json', **self.headers,
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(resp.data['registered'])
+        device = PushDevice.objects.get(token=self.TOKEN)
+        self.assertEqual(device.user, self.landlord)
+        self.assertEqual(device.platform, 'ANDROID')
+        self.assertEqual(device.device_name, 'Pixel 9')
+        self.assertTrue(device.is_active)
+        self.assertIsNotNone(device.last_seen_at)
+
+    def test_register_requires_token(self):
+        resp = self.client.post(self.PUSH_URL, {'platform': 'IOS'}, format='json', **self.headers)
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_requires_valid_platform(self):
+        resp = self.client.post(
+            self.PUSH_URL,
+            {'token': self.TOKEN, 'platform': 'WINDOWS'},
+            format='json', **self.headers,
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_defaults_to_android(self):
+        resp = self.client.post(
+            self.PUSH_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        device = PushDevice.objects.get(token=self.TOKEN)
+        self.assertEqual(device.platform, 'ANDROID')
+
+    def test_re_register_is_idempotent(self):
+        first = self.client.post(
+            self.PUSH_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            self.PUSH_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            PushDevice.objects.filter(user=self.landlord, token=self.TOKEN).count(),
+            1,
+        )
+
+    def test_unregistered_token_noop(self):
+        resp = self.client.post(
+            self.UNREG_URL, {'token': 'ExponentPushToken[ghost]'},
+            format='json', **self.headers,
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['unregistered'])
+
+    def test_unregister_deactivates_device(self):
+        self.client.post(
+            self.PUSH_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        resp = self.client.post(
+            self.UNREG_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        device = PushDevice.objects.get(token=self.TOKEN)
+        self.assertFalse(device.is_active)
+
+    def test_landlord_cannot_touch_other_users_device(self):
+        self.client.post(
+            self.PUSH_URL, {'token': self.TOKEN}, format='json', **self.headers,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {Token.objects.get_or_create(user=self.tenant)[0].key}')
+        # Unregistering another user's token is scoped to the caller → no-op.
+        resp = self.client.post(
+            self.UNREG_URL, {'token': self.TOKEN}, format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        device = PushDevice.objects.get(token=self.TOKEN)
+        self.assertTrue(device.is_active)

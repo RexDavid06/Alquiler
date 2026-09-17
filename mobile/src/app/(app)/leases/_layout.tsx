@@ -17,6 +17,7 @@ export default function LeasesLayout() {
       <Stack.Screen name="index" options={{ title: 'Leases', headerShown: false }} />
       <Stack.Screen name="lease-detail" options={{ title: 'Lease' }} />
       <Stack.Screen name="new-lease" options={{ title: 'New Lease' }} />
+      <Stack.Screen name="renew-lease" options={{ title: 'Renew Lease' }} />
     </Stack>
   );
 }

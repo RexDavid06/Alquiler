@@ -213,6 +213,7 @@ export interface RenewInput {
   start_date: string;
   expiry_date: string;
   rent_amount: string;
+  currency: string;
   rent_frequency: RentFrequency;
   rent_due_day: number;
   notes: string;

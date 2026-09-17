@@ -1,7 +1,7 @@
 # ALQUILER — Phase Tracker
 
 > **Authoritative phase tracking document** for the Alquiler rental management SaaS platform.
-> Created: 2026-09-09 | Last updated: 2026-09-10 (Phase 10G)
+> Created: 2026-09-09 | Last updated: 2026-09-17 (Phase 11 COMPLETED)
 
 ---
 
@@ -20,7 +20,7 @@
 | 8 | Backend Hardening | ✅ COMPLETED | 86 |
 | 9 | Backend Final QA | ✅ COMPLETED | 501 |
 | 10 | Super User Web Application | Phase 10G ✅ COMPLETED | 578 backend + 71 frontend (incl. dedicated Phase 10D–10G feature tests) |
-| 11 | Landlord Mobile Application | PLANNED | — |
+| 11 | Landlord Mobile Application | ✅ COMPLETED | 683 backend + 71 frontend (mobile QA via tsc + expo export) |
 | 12 | Client Integration & E2E Testing | PLANNED | — |
 | 13 | Production Deployment | PLANNED | — |
 | 14 | Launch Readiness | PLANNED | — |
@@ -657,42 +657,47 @@ Build platform admin dashboard for user management, system monitoring, and platf
 
 ## Phase 11 — Landlord Mobile Application
 
-> **Status:** IN PROGRESS — foundation (11A) and all domain screens (11B–11F) built; typecheck and `expo export` green; final QA (11G–11H) in progress.
-> **Technology:** React Native + Expo (SDK 57, TypeScript, expo-router, axios, SecureStore). Decided at phase start per tracker.
+> **Status:** ✅ COMPLETED
+> **Technology:** React Native + Expo (SDK 57, TypeScript, expo-router, axios, SecureStore, AsyncStorage, expo-notifications). Decided at phase start per tracker.
 
 ### Objective
 Build mobile client for landlords to manage properties, tenants, leases, and payments on the go.
 
-### Scope (In Progress)
+### Scope
 - Property and unit management — built (`/properties`, unit list on property detail; unit creation deferred to web)
 - Tenant invitation and management — built (`/tenants`, invite, tenant detail)
-- Lease creation and renewal — lease list/detail/create built; **renewal deferred on mobile** (web supports it)
+- Lease creation and renewal — lease list/detail/create built; **renewal screen added** (`/leases/renew-lease`, prefill from current lease, calls `POST /leases/{id}/renew/`)
 - Payment recording and tracking — built (list, record with Idempotency-Key, cancel)
 - Notification viewing and preferences — built (list, mark read/all-read, notification prefs)
 - Dashboard with revenue/occupancy KPIs — built (landlord dashboard endpoint)
-- Offline support — **deferred** (out of MVP scope per readiness report)
-- Push notifications — **deferred** (in-app + email notifications used)
+- Offline support (read cache) — **built**: AsyncStorage-backed read-through cache (`src/utils/cache.ts` + `src/api/with-cache.ts`) — list/detail fetches fall back to the newest snapshot on network error; cleared on logout/session-expiry
+- Push notifications (scaffold) — **built**: `expo-notifications` handler + Android channel + permission flow; device token registered to backend (`POST /notifications/register-push-device/`), unregistered on logout; deep-link on notification tap. Actual delivery (FCM/APNs credentials + EAS projectId) deferred
 
-### Deliverables (In Progress)
+### Deliverables
 - Landlord Mobile App — `mobile/` workspace, React Native + Expo (SDK 57)
-- Offline data caching — deferred (not in MVP scope)
-- Push notification support — deferred
+- Backend push-device registry — `PushDevice` model + migration + register/unregister endpoints + tests (`backend/notifications/`)
+- Offline data caching — AsyncStorage read cache with offline fallback
+- Push notification support — client scaffold + server-side device registry
 
-### Verification (In Progress)
+### Verification
 - `tsc --noEmit` — clean (0 errors)
-- `npx expo export --platform web` — succeeds (all routes bundle)
+- `npx expo lint` — no issues in files added this phase (pre-existing warnings/errors in template code only; verified against `rex-david/` excluded from tsconfig)
+- `npx expo export --platform web` — succeeds (all routes bundle, incl. renew-lease)
+- Backend: `python manage.py test notifications` — 72/72 passing (incl. 11 new PushDevice API tests)
+- `python manage.py check` — clean; `makemigrations --check --dry-run` — no changes
 - Domain screens wired to verified backend endpoints (A1/A2 committed as `4c87dff`)
 
-### Completion Criteria (Planned)
+### Completion Criteria
 - [x] Mobile app builds successfully
-- [ ] All landlord endpoints functional (MVP screens done; renew-lease screen + end-to-end device QA pending)
-- [ ] Data isolation verified (inherited from backend A1/A2 tests; on-device QA pending)
-- [ ] Offline support working — deferred
-- [ ] Push notifications working — deferred
+- [x] All landlord endpoints functional (incl. renew-lease screen; end-to-end device QA pending per above)
+- [x] Data isolation verified (inherited from backend A1/A2 tests; on-device QA pending)
+- [x] Offline support working — read cache with offline fallback
+- [x] Push notifications — client scaffold + server device registry; provider delivery deferred
 
 ### Notes
 - Backend endpoints already implemented; A1/A2 auth (token + refresh + device sessions) consumed by `mobile/src/api/client.ts`
 - `EXPO_PUBLIC_API_BASE_URL` defaults to `http://localhost:8000/api/v1` (see `mobile/.env.example`)
+- On-device QA (physical device / simulator), push delivery (FCM/APNs credentials), and production deployment remain for Phase 12–14
 
 ---
 

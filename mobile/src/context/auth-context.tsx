@@ -9,6 +9,11 @@ import {
   setSessionExpiredHandler,
 } from '@/api/client';
 import type { User } from '@/api/types';
+import { cacheClear } from '@/utils/cache';
+import {
+  registerForPushNotificationsAs,
+  unregisterPushNotifications,
+} from '@/utils/push-notifications';
 import { storage } from '@/utils/storage';
 
 interface AuthContextValue {
@@ -34,6 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const handleSessionExpired = useCallback(async () => {
     await clearSession();
+    await cacheClear();
+    await unregisterPushNotifications();
     setUser(null);
   }, []);
 
@@ -47,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = await storage.getItemAsync(STORAGE_KEYS.accessToken);
       if (stored && token) {
         setUser(stored);
+        void registerForPushNotificationsAs();
       } else {
         await clearSession();
       }
@@ -59,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const data = await authApi.login({ email, password });
     setUser(data.user);
+    void registerForPushNotificationsAs();
     return data.user;
   }, []);
 
@@ -71,12 +80,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }) => {
     const res = await authApi.register(data);
     setUser(res.user);
+    void registerForPushNotificationsAs();
     return res.user;
   }, []);
 
   const logout = useCallback(async () => {
+    await unregisterPushNotifications();
     await authApi.logout();
     await clearSession();
+    await cacheClear();
     setUser(null);
   }, []);
 

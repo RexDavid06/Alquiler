@@ -61,3 +61,15 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         model = NotificationPreference
         fields = ['email_enabled', 'in_app_enabled', 'updated_at']
         read_only_fields = ['updated_at']
+
+
+class PushDeviceSerializer(serializers.Serializer):
+    """Register / unregister a push device token for the current user."""
+
+    token = serializers.CharField(max_length=512)
+    platform = serializers.ChoiceField(
+        choices=['ANDROID', 'IOS', 'WEB'],
+        default='ANDROID',
+        required=False,
+    )
+    device_name = serializers.CharField(max_length=120, required=False, allow_blank=True)

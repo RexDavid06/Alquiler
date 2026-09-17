@@ -1,16 +1,22 @@
 import api from './client';
+import { withCache } from './with-cache';
+import { cacheKey } from '@/utils/cache';
 import type { PaginatedResponse, Property, PropertyInput, Unit, UnitInput } from './types';
 
 const PROPERTIES = '/properties/';
 
 export async function listProperties(params?: { search?: string; status?: string; page?: number }) {
-  const res = await api.get<PaginatedResponse<Property>>(PROPERTIES, { params });
-  return res.data;
+  return withCache(cacheKey('properties', params?.search, params?.status, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Property>>(PROPERTIES, { params });
+    return res.data;
+  });
 }
 
 export async function getProperty(id: number): Promise<Property> {
-  const res = await api.get<Property>(`${PROPERTIES}${id}/`);
-  return res.data;
+  return withCache(cacheKey('property', id), async () => {
+    const res = await api.get<Property>(`${PROPERTIES}${id}/`);
+    return res.data;
+  });
 }
 
 export async function createProperty(data: PropertyInput): Promise<Property> {
@@ -24,11 +30,13 @@ export async function updateProperty(id: number, data: Partial<PropertyInput>): 
 }
 
 export async function listUnits(propertyId: number, params?: { page?: number }) {
-  const res = await api.get<PaginatedResponse<Unit>>(
-    `${PROPERTIES}${propertyId}/units/`,
-    { params },
-  );
-  return res.data;
+  return withCache(cacheKey('units', propertyId, params?.page ?? 1), async () => {
+    const res = await api.get<PaginatedResponse<Unit>>(
+      `${PROPERTIES}${propertyId}/units/`,
+      { params },
+    );
+    return res.data;
+  });
 }
 
 export async function createUnit(propertyId: number, data: UnitInput): Promise<Unit> {

@@ -5,6 +5,7 @@ their own notifications. Cross-user access returns 404.
 """
 
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter
@@ -13,12 +14,13 @@ from rest_framework.response import Response
 
 from core.models import NotificationPreference
 
-from .models import Notification
+from .models import Notification, PushDevice
 from .serializers import (
     BulkMarkReadSerializer,
     MarkReadSerializer,
     NotificationPreferenceSerializer,
     NotificationSerializer,
+    PushDeviceSerializer,
 )
 
 
@@ -114,3 +116,52 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(NotificationPreferenceSerializer(pref).data)
+
+    @action(detail=False, methods=['post'], url_path='register-push-device',
+            serializer_class=PushDeviceSerializer)
+    def register_push_device(self, request):
+        """Register (or re-register) a push device token for the current user.
+
+        Idempotent: registering an existing token updates its metadata and
+        re-activates it instead of creating a duplicate row.
+        """
+        serializer = PushDeviceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        device, created = PushDevice.objects.update_or_create(
+            user=request.user,
+            token=data['token'],
+            defaults={
+                'platform': data.get('platform', PushDevice.Platform.ANDROID),
+                'device_name': data.get('device_name', ''),
+                'is_active': True,
+                'last_seen_at': timezone.now(),
+            },
+        )
+        return Response(
+            {
+                'id': device.pk,
+                'registered': True,
+                'created': created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['post'], url_path='unregister-push-device',
+            serializer_class=PushDeviceSerializer)
+    def unregister_push_device(self, request):
+        """Deactivate a push device token for the current user.
+
+        The row is kept for audit; ``is_active`` is set to False so future
+        sends are skipped.  Unregistering an unknown token is a no-op.
+        """
+        serializer = PushDeviceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+
+        PushDevice.objects.filter(
+            user=request.user, token=token, is_active=True,
+        ).update(is_active=False, updated_at=timezone.now())
+
+        return Response({'registered': False, 'unregistered': True})
